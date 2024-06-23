@@ -40,15 +40,12 @@
     "@vben-core/design": "workspace:*"
   },
   "dependencies": {
-    "@vben-core/colorful": "workspace:*",
     "@vben-core/design": "workspace:*",
     "@vben-core/iconify": "workspace:*",
     "@vben-core/preferences": "workspace:*",
     "@vben-core/shadcn-ui": "workspace:*",
-    "@vben-core/toolkit": "workspace:*",
     "@vben/chart-ui": "workspace:*",
     "@vben/locales": "workspace:*",
-    "@vueuse/core": "^10.11.0",
     "@vueuse/integrations": "^10.11.0",
     "qrcode": "^1.5.3",
     "vue": "^3.4.30",
