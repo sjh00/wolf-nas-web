@@ -1,0 +1,50 @@
+{
+  "name": "@vben/chart-ui",
+  "version": "5.0.0",
+  "homepage": "https://github.com/vbenjs/vue-vben-admin",
+  "bugs": "https://github.com/vbenjs/vue-vben-admin/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vbenjs/vue-vben-admin.git",
+    "directory": "packages/business/chart-ui"
+  },
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm vite build",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "default": "./dist/index.mjs"
+      }
+    }
+  },
+  "peerDependencies": {
+    "@vben-core/design": "workspace:*"
+  },
+  "dependencies": {
+    "@vben-core/preferences": "workspace:*",
+    "echarts": "^5.5.0",
+    "vue": "^3.4.29"
+  },
+  "devDependencies": {
+    "@vben/types": "workspace:*"
+  }
+}
