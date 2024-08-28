@@ -4,7 +4,7 @@ import { useVbenModal, VbenButton } from '@vben/common-ui';
 import ExtraModal from './modal.vue';
 
 const [Modal, modalApi] = useVbenModal({
-  // 链接抽离的组件
+  // 连接抽离的组件
   connectedComponent: ExtraModal,
 });
 
@@ -16,7 +16,6 @@ function openModal() {
 <template>
   <div>
     <Modal />
-
-    <VbenButton @click="openModal">打开弹窗</VbenButton>
+    <VbenButton @click="openModal">Open</VbenButton>
   </div>
 </template>
