@@ -3,9 +3,10 @@ import type { FilterApi } from '#/api/modules/filter';
 
 import { ref, watch } from 'vue';
 
-import { NButton, NForm, NFormItem, NInput, NModal, NSpace } from 'naive-ui';
+import { NButton, NForm, NFormItem, NInput, NModal, NSelect, NSpace } from 'naive-ui';
 
 import { addFilterRuleApi } from '#/api/modules/filter';
+import { ORIGINAL_LANGUAGE_OPTIONS } from '#/constants/filterOptions';
 
 const props = defineProps<{
   editingRule: FilterApi.FilterRuleItem | null;
@@ -27,6 +28,7 @@ const form = ref({
   rule_exclude: '',
   rule_sizelimit: '',
   rule_free: '',
+  rule_original_language: '',
 });
 
 watch(
@@ -42,6 +44,7 @@ watch(
             rule_exclude: (props.editingRule.exclude || []).join('\n'),
             rule_sizelimit: props.editingRule.size || '',
             rule_free: props.editingRule.free_text || '',
+            rule_original_language: props.editingRule.original_language || '',
           }
         : {
             rule_id: undefined,
@@ -51,6 +54,7 @@ watch(
             rule_exclude: '',
             rule_sizelimit: '',
             rule_free: '',
+            rule_original_language: '',
           };
     }
   },
@@ -69,6 +73,7 @@ async function handleSubmit() {
       rule_exclude: form.value.rule_exclude.trim() || undefined,
       rule_sizelimit: form.value.rule_sizelimit.trim() || undefined,
       rule_free: form.value.rule_free.trim() || undefined,
+      rule_original_language: form.value.rule_original_language || undefined,
     });
     emit('update:show', false);
     emit('success');
@@ -97,6 +102,13 @@ async function handleSubmit() {
         <NInput
           v-model:value="form.rule_pri"
           placeholder="数字越小优先级越高"
+        />
+      </NFormItem>
+      <NFormItem label="指定原始语言">
+        <NSelect
+          v-model:value="form.rule_original_language"
+          :options="ORIGINAL_LANGUAGE_OPTIONS"
+          placeholder="按 TMDB 原始语言筛选，留空不约束"
         />
       </NFormItem>
       <NFormItem label="包含">

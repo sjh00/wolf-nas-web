@@ -13,6 +13,8 @@ export namespace FilterApi {
     exclude?: string[];
     size?: string;
     free_text?: string;
+    /** 指定原始语言代码：'' / 'zh' / 'en' / 'ja' / 'ko' / 'fr' / 'de' / 'ru' / 'hi' / 'other' */
+    original_language?: string;
   }
 
   export interface FilterRuleGroup {
@@ -75,6 +77,7 @@ export async function addFilterRuleApi(data: {
   rule_id?: number;
   rule_include?: string;
   rule_name?: string;
+  rule_original_language?: string;
   rule_pri?: string;
   rule_sizelimit?: string;
 }) {
@@ -106,6 +109,7 @@ export async function restoreFilterGroupApi(data: {
 
 /** 测试过滤规则 */
 export async function testFilterRuleApi(data: {
+  original_language?: string;
   rulegroup?: string;
   size?: string;
   subtitle?: string;
