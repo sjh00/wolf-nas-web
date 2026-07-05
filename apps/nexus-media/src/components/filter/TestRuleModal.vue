@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 
-import { NButton, NForm, NFormItem, NInput, NModal, NSpace } from 'naive-ui';
+import { NButton, NForm, NFormItem, NInput, NModal, NSelect, NSpace } from 'naive-ui';
 
 import { testFilterRuleApi } from '#/api/modules/filter';
+import { ORIGINAL_LANGUAGE_OPTIONS } from '#/constants/filterOptions';
 import { useAppNotification } from '#/utils/notify';
 
 const props = defineProps<{
@@ -21,6 +22,7 @@ const form = ref({
   title: '',
   subtitle: '',
   size: '',
+  original_language: '',
 });
 const result = ref<null | {
   flag: boolean;
@@ -32,7 +34,7 @@ watch(
   () => props.show,
   (val) => {
     if (val) {
-      form.value = { title: '', subtitle: '', size: '' };
+      form.value = { title: '', subtitle: '', size: '', original_language: '' };
       result.value = null;
     }
   },
@@ -47,6 +49,7 @@ async function handleTest() {
       subtitle: form.value.subtitle.trim() || undefined,
       size: form.value.size.trim() || undefined,
       rulegroup: props.groupName,
+      original_language: form.value.original_language || undefined,
     });
     result.value = res?.data || res;
   } catch (error: any) {
@@ -78,6 +81,13 @@ async function handleTest() {
       </NFormItem>
       <NFormItem label="大小">
         <NInput v-model:value="form.size" placeholder="如: 15.2GB" />
+      </NFormItem>
+      <NFormItem label="模拟原始语言">
+        <NSelect
+          v-model:value="form.original_language"
+          :options="ORIGINAL_LANGUAGE_OPTIONS"
+          placeholder="显式模拟种子的原始语言（可选）"
+        />
       </NFormItem>
     </NForm>
 

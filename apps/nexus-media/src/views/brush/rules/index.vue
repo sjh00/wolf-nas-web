@@ -27,6 +27,7 @@ import {
 import RangeField from '#/components/brush/RangeField.vue';
 import EmptyState from '#/components/empty/EmptyState.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
+import { getOriginalLanguageLabel, ORIGINAL_LANGUAGE_OPTIONS } from '#/constants/filterOptions';
 import { useAppNotification } from '#/utils/notify';
 
 const notification = useAppNotification();
@@ -81,6 +82,7 @@ const form = ref({
   torrent_size: '',
   peercount: '',
   pubdate: '',
+  original_language: '',
   mode: 'or',
   seedtime: '',
   hr_seedtime: '',
@@ -182,6 +184,7 @@ function openEdit(rule?: BrushApi.BrushRule) {
         torrent_size: rss.size || '',
         peercount: rss.peercount || '',
         pubdate: rss.pubdate || '',
+        original_language: rss.original_language || '',
         mode: 'or',
         seedtime: '',
         hr_seedtime: '',
@@ -219,6 +222,7 @@ function openEdit(rule?: BrushApi.BrushRule) {
         torrent_size: '',
         peercount: '',
         pubdate: '',
+        original_language: '',
         mode: remove.mode || 'or',
         seedtime: remove.time || '',
         hr_seedtime: remove.hr_seedtime || '',
@@ -257,6 +261,7 @@ function openEdit(rule?: BrushApi.BrushRule) {
         torrent_size: '',
         peercount: '',
         pubdate: '',
+        original_language: '',
         mode: 'or',
         seedtime: '',
         hr_seedtime: '',
@@ -294,6 +299,7 @@ function openEdit(rule?: BrushApi.BrushRule) {
       torrent_size: '',
       peercount: '',
       pubdate: '',
+      original_language: '',
       mode: 'or',
       seedtime: '',
       hr_seedtime: '',
@@ -332,6 +338,7 @@ function getRssRule() {
   if (f.torrent_size) rule.size = f.torrent_size;
   if (f.peercount) rule.peercount = f.peercount;
   if (f.pubdate) rule.pubdate = f.pubdate;
+  if (f.original_language) rule.original_language = f.original_language;
   return rule;
 }
 
@@ -410,6 +417,7 @@ async function handleSave() {
         if (f.torrent_size) r.size = f.torrent_size;
         if (f.peercount) r.peercount = f.peercount;
         if (f.pubdate) r.pubdate = f.pubdate;
+        if (f.original_language) r.original_language = f.original_language;
         return r;
       }
       default: {
@@ -494,6 +502,11 @@ function buildRuleSummary(rule: BrushApi.BrushRule) {
     rssItems.push({ icon: 'lucide:users', text: `做种${rss.peercount}` });
   if (rss.pubdate)
     rssItems.push({ icon: 'lucide:clock', text: `发布${rss.pubdate}h` });
+  if (rss.original_language)
+    rssItems.push({
+      icon: 'lucide:languages',
+      text: `原始语言: ${getOriginalLanguageLabel(rss.original_language) || rss.original_language}`,
+    });
 
   const removeItems: Array<{ icon: string; text: string }> = [];
   if (remove.time)
@@ -1025,6 +1038,14 @@ onMounted(() => {
                 v-model="form.pubdate"
                 :options="allGtLtBwOptions"
                 placeholder="如: 24"
+              />
+            </NFormItem>
+            <NFormItem path="original_language" label="指定原始语言">
+              <NSelect
+                v-model:value="form.original_language"
+                :options="ORIGINAL_LANGUAGE_OPTIONS"
+                clearable
+                placeholder="按 TMDB 原始语言筛选，留空不约束"
               />
             </NFormItem>
           </div>

@@ -14,6 +14,7 @@ import {
   setDefaultFilterGroupApi,
   shareFilterGroupApi,
 } from '#/api/modules/filter';
+import { getOriginalLanguageLabel } from '#/constants/filterOptions';
 import { useAppNotification } from '#/utils/notify';
 
 interface Props {
@@ -45,6 +46,10 @@ function getRuleSummary(rule: FilterApi.FilterRuleItem): string {
 
   if (rule.size && Number(rule.size) > 0) parts.push(`大小 ${rule.size}`);
   if (rule.free_text) parts.push(rule.free_text);
+  if (rule.original_language) {
+    const label = getOriginalLanguageLabel(rule.original_language);
+    parts.push(`原始语言 ${label || rule.original_language}`);
+  }
   return parts.join(' · ') || '无过滤条件';
 }
 
@@ -334,6 +339,13 @@ function handleTest() {
               </NTag>
               <NTag v-if="rule.free_text" size="tiny" type="info">
                 {{ rule.free_text }}
+              </NTag>
+              <NTag
+                v-if="rule.original_language"
+                size="tiny"
+                type="success"
+              >
+                原始语言: {{ getOriginalLanguageLabel(rule.original_language) }}
               </NTag>
             </div>
           </div>
