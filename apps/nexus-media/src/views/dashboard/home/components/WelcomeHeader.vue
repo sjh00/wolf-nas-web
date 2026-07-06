@@ -82,7 +82,7 @@ const uptimeText = computed(() => {
           {{ greeting }}, {{ userName }}
         </h2>
         <p class="mt-0.5 text-sm" style="color: hsl(var(--muted-foreground))">
-          {{ version ? `Nexus Media ${version}` : 'Nexus Media' }}
+          {{ version ? `WolfNas ${version}` : 'WolfNas' }}
         </p>
       </div>
     </div>

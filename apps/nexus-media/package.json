@@ -1,12 +1,12 @@
 {
-  "name": "@nexus-media/frontend",
+  "name": "@wolfnas/frontend",
   "version": "4.2.1",
   "homepage": "https://github.com/linyuan0213/nexus-media",
   "bugs": "https://github.com/linyuan0213/nexus-media/issues",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/linyuan0213/nexus-media.git",
-    "directory": "web/frontend/apps/nexus-media"
+    "directory": "web/frontend/apps/wolfnas"
   },
   "license": "MIT",
   "author": {

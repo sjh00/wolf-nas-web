@@ -497,7 +497,7 @@ function labelWithHelp(label: string, helpText: string) {
                 () =>
                   labelWithHelp(
                     '保存目录',
-                    '为该刷新任务设置独立的保存目录，将会覆盖下载器中的目录设置，如果下载器为Qbittorrent还需要在Nexus Media下载器设置中关闭种子自动管理功能',
+                    '为该刷新任务设置独立的保存目录，将会覆盖下载器中的目录设置，如果下载器为Qbittorrent还需要在WolfNas下载器设置中关闭种子自动管理功能',
                   )
               "
             />

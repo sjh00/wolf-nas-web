@@ -41,7 +41,7 @@ async function handleSave() {
     <div class="w-full max-w-sm">
       <h1 class="mb-2 text-xl font-bold">设置服务端地址</h1>
       <p class="mb-6 text-sm text-muted-foreground">
-        用于连接 Nexus Media 后端，例如 http://localhost:3000
+        用于连接 WolfNas 后端，例如 http://localhost:3000
       </p>
       <input
         v-model="url"
