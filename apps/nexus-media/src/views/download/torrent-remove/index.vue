@@ -36,7 +36,7 @@ interface RemoveTask {
   downloader: string;
   downloader_name: string;
   downloader_type: string;
-  only_nexus_media: number;
+  only_wolf_nas: number;
   samedata: number;
   action: number;
   config: {
@@ -142,7 +142,7 @@ function handleAdd() {
     interval: 60,
     enabled: 0,
     samedata: 0,
-    only_nexus_media: 1,
+    only_wolf_nas: 1,
   };
   tagInput.value = '';
   filterStatusInput.value = [];
@@ -206,7 +206,7 @@ async function handleSave() {
       interval: Number(d.interval),
       enabled: d.enabled,
       samedata: d.samedata,
-      only_nexus_media: d.only_nexus_media,
+      only_wolf_nas: d.only_wolf_nas,
       ratio: Number(editingConfig.value.ratio) || 0,
       seeding_time: Number(editingConfig.value.seeding_time) || 0,
       upload_avs: Number(editingConfig.value.upload_avs) || 0,
@@ -386,7 +386,7 @@ onMounted(fetchData);
               <div class="detail-item">
                 <div class="detail-label">隔离</div>
                 <div class="detail-value">
-                  <NTag v-if="task.only_nexus_media" size="tiny">隔离</NTag>
+                  <NTag v-if="task.only_wolf_nas" size="tiny">隔离</NTag>
                   <span v-else class="detail-muted">否</span>
                 </div>
               </div>
@@ -581,7 +581,7 @@ onMounted(fetchData);
           </NFormItem>
           <NFormItem label="隔离">
             <NSelect
-              v-model:value="editing.only_nexus_media"
+              v-model:value="editing.only_wolf_nas"
               :options="[
                 { label: '是', value: 1 },
                 { label: '否', value: 0 },

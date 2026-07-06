@@ -25,7 +25,7 @@ export namespace DownloadApi {
     password?: string;
     enabled?: number;
     transfer?: number;
-    only_nexus_media?: number;
+    only_wolf_nas?: number;
     match_path?: number;
     rmt_mode?: string;
     config?: string;
@@ -59,7 +59,7 @@ export namespace DownloadApi {
     downloader: string;
     downloader_name: string;
     downloader_type: string;
-    only_nexus_media: number;
+    only_wolf_nas: number;
     samedata: number;
     action: number;
     config: {

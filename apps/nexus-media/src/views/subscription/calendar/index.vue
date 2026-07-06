@@ -43,7 +43,7 @@ const webcalLink = ref('');
 const httpCalLink = ref('');
 const webcalLoading = ref(false);
 const calServerHost = ref(
-  localStorage.getItem('nexus-media-calendar-host') || window.location.host,
+  localStorage.getItem('wolfnas-calendar-host') || window.location.host,
 );
 const webcalSettingShow = ref(false);
 
@@ -84,7 +84,7 @@ async function exportCalendar() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'nexus-media-subscriptions.ics';
+    a.download = 'wolfnas-subscriptions.ics';
     document.body.append(a);
     a.click();
     a.remove();
@@ -106,7 +106,7 @@ async function ensureCalendarLinks() {
       return;
     }
     const host = calServerHost.value || window.location.host;
-    localStorage.setItem('nexus-media-calendar-host', host);
+    localStorage.setItem('wolfnas-calendar-host', host);
     const apiUrl = import.meta.env.VITE_GLOB_API_URL || '/api';
     const base = apiUrl.endsWith('/api') ? apiUrl : `${apiUrl}/api`;
     const absBase = base.startsWith('http') ? base : `http://${host}${base}`;

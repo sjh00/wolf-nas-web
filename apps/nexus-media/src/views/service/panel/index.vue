@@ -532,7 +532,7 @@ async function handleBackupDownload() {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `nexus_media_backup_${new Date().toISOString().slice(0, 10)}.zip`;
+    link.download = `wolf_nas_backup_${new Date().toISOString().slice(0, 10)}.zip`;
     document.body.append(link);
     link.click();
     link.remove();

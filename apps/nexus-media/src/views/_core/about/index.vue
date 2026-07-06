@@ -63,7 +63,7 @@ onMounted(fetchSystemInfo);
 
 <template>
   <div class="p-4">
-    <PageHeader title="关于项目" subtitle="Nexus Media 媒体自动化工具" />
+    <PageHeader title="关于项目" subtitle="WolfNas 媒体自动化工具" />
 
     <NSpin :show="loading" class="mt-4">
       <NSpace vertical size="large">
@@ -79,7 +79,7 @@ onMounted(fetchSystemInfo);
           <div class="flex items-start gap-4">
             <img
               :src="logoUrl"
-              alt="Nexus Media"
+              alt="WolfNas"
               class="size-16 shrink-0 rounded-xl object-contain"
               onerror="this.style.display = 'none';"
             />
@@ -88,7 +88,7 @@ onMounted(fetchSystemInfo);
                 <span
                   class="text-xl font-bold"
                   style="color: hsl(var(--card-foreground))"
-                  >Nexus Media</span
+                  >WolfNas</span
                 >
                 <NTag size="small" type="primary" round>
                   {{ systemInfo.version || '-' }}

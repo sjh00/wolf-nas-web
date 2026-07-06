@@ -37,7 +37,7 @@ interface DownloaderItem {
   enabled: number;
   config: Record<string, any>;
   transfer?: number;
-  only_nexus_media?: number;
+  only_wolf_nas?: number;
   match_path?: number;
   rmt_mode?: string;
   rmt_mode_name?: string;
@@ -143,7 +143,7 @@ function handleAdd() {
     type: 'qbittorrent',
     enabled: 1,
     transfer: 0,
-    only_nexus_media: 0,
+    only_wolf_nas: 0,
     match_path: 0,
     rmt_mode: 'link',
   };
@@ -188,7 +188,7 @@ async function handleSave() {
     type: editingType.value,
     enabled: data.enabled,
     transfer: data.transfer,
-    only_nexus_media: data.only_nexus_media,
+    only_wolf_nas: data.only_wolf_nas,
     match_path: data.match_path,
     rmt_mode: data.rmt_mode,
     config: JSON.stringify(editingConfig.value),
@@ -414,7 +414,7 @@ onMounted(fetchData);
                 {{ item.rmt_mode_name || item.rmt_mode }}
               </div>
               <div
-                v-if="item.only_nexus_media === 1"
+                v-if="item.only_wolf_nas === 1"
                 class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium"
                 style="
                   color: hsl(var(--warning));
@@ -706,7 +706,7 @@ onMounted(fetchData);
                   </NTooltip>
                 </template>
                 <NSelect
-                  v-model:value="editingDownloader.only_nexus_media"
+                  v-model:value="editingDownloader.only_wolf_nas"
                   :options="[
                     { label: '是', value: 1 },
                     { label: '否', value: 0 },
@@ -812,7 +812,7 @@ onMounted(fetchData);
                   v-model:value="dir.container_path"
                   class="flex-1"
                   size="small"
-                  placeholder="Nexus Media访问目录"
+                  placeholder="WolfNas访问目录"
                 />
               </div>
             </div>

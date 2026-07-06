@@ -27,7 +27,7 @@ export const overridesPreferences = defineOverridesPreferences({
     timezone: false,
   },
   copyright: {
-    companyName: 'Nexus Media',
+    companyName: 'WolfNas',
     companySiteLink: 'https://github.com/linyuan0213/nexus-media',
     date: '2026',
     enable: true,
