@@ -42,7 +42,9 @@ export namespace SiteApi {
 
   export interface SiteStatisticsItem {
     site_name: string;
+    username?: string;
     user_level?: string;
+    join_at?: string;
     upload: string;
     download: string;
     ratio: string;
@@ -77,11 +79,29 @@ export namespace SiteApi {
   }
 }
 
+/** 站点定义 */
+export interface SiteDefinition {
+  id: string;
+  name: string;
+  domain: string;
+  type: string;
+  public: boolean;
+  domain_aliases: string[];
+  encoding: string;
+  detail_page_url: string;
+}
+
+/** 获取站点定义列表 */
+export async function getSiteDefinitionsApi() {
+  return requestClient.post<SiteDefinition[]>('/site/sites/definitions', {});
+}
+
 /** 获取站点列表 */
 export async function getSitesApi(filter?: {
   basic?: boolean;
   brush?: boolean;
   rss?: boolean;
+  source?: string;
   statistic?: boolean;
 }) {
   return requestClient.post<SiteApi.SiteItem[]>('/site/sites', filter || {});
@@ -124,14 +144,39 @@ export async function deleteSiteApi(id: number) {
 
 /** 测试站点连通性 */
 export async function testSiteApi(id: number) {
-  return requestClient.post('/site/sites/test', { id: String(id) });
+  return requestClient.post(
+    '/site/sites/test',
+    { id: String(id) },
+    { timeout: 120_000 },
+  );
+}
+
+export interface SiteBatchTestResult {
+  flag: boolean;
+  id: string;
+  msg: string;
+  times: number;
+}
+
+/** 批量测试站点连接（不抛异常，返回每个站点结果） */
+export async function testSiteBatchApi(ids: Array<number | string>) {
+  return requestClient.post<SiteBatchTestResult[]>(
+    '/site/sites/test_batch',
+    { ids: ids.map(String) },
+    // 后端并发测试多个站点，单站最长 ~15s，放宽超时避免整体请求超时
+    { timeout: 300_000 },
+  );
 }
 
 /** 执行签到 */
 export async function signinSiteApi(id?: number) {
-  return requestClient.post('/site/sites/signin', {
-    id: id == null ? undefined : String(id),
-  });
+  return requestClient.post(
+    '/site/sites/signin',
+    {
+      id: id == null ? undefined : String(id),
+    },
+    { timeout: 120_000 },
+  );
 }
 
 /** 获取站点统计 */
@@ -147,6 +192,7 @@ export async function getSiteStatisticsApi(params?: {
       sort_by: params?.sort_by,
       sort_on: params?.sort_on,
     },
+    { timeout: 120_000 },
   );
 }
 
@@ -155,6 +201,7 @@ export async function getSiteResourcesApi(params: {
   id?: string;
   keyword?: string;
   page?: number;
+  page_size?: number;
 }) {
   return requestClient.post<{
     list: SiteApi.SiteResourceItem[];
@@ -196,14 +243,19 @@ export async function refreshSiteStatisticsApi(sites?: string[]) {
   return requestClient.post<{ message: string }>(
     '/site/sites/statistics/refresh',
     { sites },
+    { timeout: 120_000 },
   );
 }
 
 /** 获取站点做种信息 */
 export async function getSiteSeedingApi(name: string) {
-  return requestClient.post<{ dataset: any[] }>('/site/sites/seeding', {
-    name,
-  });
+  return requestClient.post<{ dataset: any[] }>(
+    '/site/sites/seeding',
+    {
+      name,
+    },
+    { timeout: 120_000 },
+  );
 }
 
 /** 获取所有站点图标 */

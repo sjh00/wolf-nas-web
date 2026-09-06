@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { ResourceItem, SiteItem } from './types';
 
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -14,8 +14,10 @@ import {
   getIndexersApi,
   resolveDownloadUrlApi,
 } from '#/api/modules/download';
+import { nameTestApi } from '#/api/modules/media';
 import { getSiteFaviconsApi, getSiteResourcesApi } from '#/api/modules/site';
 import EmptyState from '#/components/empty/EmptyState.vue';
+import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import { useDownloadEventStream } from '#/composables/useDownloadEventStream';
 import { useAppNotification } from '#/utils/notify';
 
@@ -33,6 +35,15 @@ const keyword = ref('');
 const currentPage = ref(1);
 const pageSize = ref(20);
 const total = ref(0);
+const loadedCount = ref(0);
+const hasMorePage = ref(false);
+const effectivePageSize = ref(0);
+
+/** 站点不支持每页数量时锁定底部选择器（实际返回数 ≠ 选择值时） */
+const sizePickerDisabled = computed(
+  () =>
+    effectivePageSize.value > 0 && effectivePageSize.value !== pageSize.value,
+);
 const favicons = ref<Record<string, string>>({});
 const faviconLoadFailed = ref<Record<string, boolean>>({});
 const viewMode = ref<'grid' | 'list'>('grid');
@@ -47,6 +58,28 @@ const downloadDirs = ref<Array<{ label: string; value: string }>>([
 ]);
 const selectedDownloadSetting = ref('');
 const selectedDownloadDir = ref('');
+
+const identifyResult = ref<Record<string, any>>({});
+const identifyLoading = ref(false);
+const showIdentify = ref(false);
+
+async function handleIdentify(item: ResourceItem) {
+  if (!item.title) return;
+  identifyLoading.value = true;
+  showIdentify.value = true;
+  identifyResult.value = {};
+  try {
+    const res: any = await nameTestApi(
+      item.title,
+      item.description || undefined,
+    );
+    identifyResult.value = res?.data ?? res ?? {};
+  } catch {
+    showIdentify.value = false;
+  } finally {
+    identifyLoading.value = false;
+  }
+}
 
 async function fetchSites() {
   loading.value = true;
@@ -76,6 +109,9 @@ function selectSite(site: SiteItem) {
   keyword.value = '';
   currentPage.value = 1;
   total.value = 0;
+  loadedCount.value = 0;
+  effectivePageSize.value = 0;
+  hasMorePage.value = false;
   fetchData();
 }
 
@@ -83,6 +119,9 @@ function backToSites() {
   selectedSite.value = null;
   resources.value = [];
   total.value = 0;
+  loadedCount.value = 0;
+  effectivePageSize.value = 0;
+  hasMorePage.value = false;
 }
 
 async function fetchData(page = 1) {
@@ -92,24 +131,33 @@ async function fetchData(page = 1) {
     const res: any = await getSiteResourcesApi({
       id: selectedSite.value.id,
       page: page - 1,
+      page_size: pageSize.value,
       keyword: keyword.value || undefined,
     });
+    // requestClient 已解包 {code,data,message} → res 即后端 data（{list, has_more}）
     let data: any[] = [];
-    if (Array.isArray(res)) {
-      data = res;
-    } else if (Array.isArray(res?.data)) {
-      data = res.data;
-    } else if (Array.isArray(res?.data?.list)) {
-      data = res.data.list;
-    } else if (res?.data) {
-      data = [res.data];
+    let hasMore = false;
+    if (Array.isArray(res?.list)) {
+      data = res.list;
+      hasMore = !!res?.has_more;
+    } else {
+      data = Array.isArray(res) ? res : [];
     }
     resources.value = data;
     currentPage.value = page;
-    total.value =
-      data.length > 0
-        ? Math.max(total.value, page * pageSize.value + 1)
-        : (page - 1) * pageSize.value;
+    hasMorePage.value = hasMore;
+    // 站点实际每页数量：HTML 站可能不支持每页数量参数（固定返回站点默认值），
+    // 以第一页实际返回数为准做计数/分页数学，避免"选20/页却返回100条"显示错乱
+    if (page === 1 && data.length > 0) {
+      effectivePageSize.value = data.length;
+    }
+    const perPage = effectivePageSize.value || pageSize.value;
+    const loaded = (page - 1) * perPage + data.length;
+    // total 仅用于分页导航（展示用 loadedCount）：有下一页时保证下一页可点
+    total.value = hasMore
+      ? Math.max(loaded + 1, page * pageSize.value + 1)
+      : loaded;
+    loadedCount.value = loaded;
   } catch {
     // 全局请求拦截器已展示错误提示
   } finally {
@@ -120,12 +168,25 @@ async function fetchData(page = 1) {
 function handleSearch() {
   currentPage.value = 1;
   total.value = 0;
+  loadedCount.value = 0;
+  effectivePageSize.value = 0;
+  hasMorePage.value = false;
   fetchData(1);
 }
 
 function handlePageChange(page: number) {
   currentPage.value = page;
   fetchData(page);
+}
+
+function handlePageSizeChange(size: number) {
+  pageSize.value = size;
+  currentPage.value = 1;
+  total.value = 0;
+  loadedCount.value = 0;
+  effectivePageSize.value = 0;
+  hasMorePage.value = false;
+  fetchData(1);
 }
 
 function handleOpenUrl(url?: string) {
@@ -380,7 +441,7 @@ onUnmounted(() => {
         >
           共
           <strong :style="{ color: 'hsl(var(--card-foreground))' }">{{
-            total
+            loadedCount
           }}</strong>
           条资源
         </span>
@@ -395,6 +456,7 @@ onUnmounted(() => {
               :item="item"
               :favicons="favicons"
               @download="openDownloadModal"
+              @identify="handleIdentify"
               @open-url="handleOpenUrl"
             />
           </div>
@@ -406,6 +468,7 @@ onUnmounted(() => {
               :item="item"
               :favicons="favicons"
               @download="openDownloadModal"
+              @identify="handleIdentify"
               @open-url="handleOpenUrl"
             />
           </div>
@@ -426,7 +489,7 @@ onUnmounted(() => {
         </EmptyState>
 
         <div
-          v-if="total > pageSize"
+          v-if="hasMorePage || total > pageSize"
           class="pagination-bar"
           :style="{ borderColor: 'hsl(var(--border))' }"
         >
@@ -435,8 +498,9 @@ onUnmounted(() => {
             :page-size="pageSize"
             :item-count="total"
             :page-sizes="[20, 50, 100]"
-            show-size-picker
+            :show-size-picker="!sizePickerDisabled"
             @update:page="handlePageChange"
+            @update:page-size="handlePageSizeChange"
           />
         </div>
       </NSpin>
@@ -452,6 +516,12 @@ onUnmounted(() => {
       :dirs="downloadDirs"
       @setting-change="onDownloadSettingChange"
       @confirm="confirmDownload"
+    />
+
+    <IdentifyResult
+      v-model:show="showIdentify"
+      :loading="identifyLoading"
+      :result="identifyResult"
     />
   </div>
 </template>

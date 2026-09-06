@@ -17,6 +17,7 @@ import AgentSection from './components/AgentSection.vue';
 import LaboratorySection from './components/LaboratorySection.vue';
 import LogSection from './components/LogSection.vue';
 import MediaSection from './components/MediaSection.vue';
+import RenameSection from './components/RenameSection.vue';
 import ServiceSection from './components/ServiceSection.vue';
 import SiteConfigCard from './components/SiteConfigCard.vue';
 import SystemSection from './components/SystemSection.vue';
@@ -126,8 +127,6 @@ function saveMedia() {
       'media.media_default_path',
       'media.ignored_paths',
       'media.ignored_files',
-      'media.movie_name_format',
-      'media.tv_name_format',
       'media.filesize_cover',
       'media.nfo_poster',
       'media.sync_transfer_interval',
@@ -136,23 +135,26 @@ function saveMedia() {
   );
 }
 
+function saveRename() {
+  saveSection(
+    'rename',
+    buildPayload(['media.movie_name_format', 'media.tv_name_format']),
+  );
+}
+
 function currentProviderName(): string {
   return config.value['agent.default_provider'] || 'openai';
 }
 
 function saveAi() {
-  const data = buildPayload([
-    'agent.enabled',
-    'agent.default_provider',
-    'agent.media_recognizer_enabled',
-    'agent.batch_size',
-  ]);
-  const provider = currentProviderName();
-  ['api_url', 'api_key', 'model'].forEach((field) => {
-    const v = config.value[`agent.providers.${provider}.${field}`];
-    if (v !== undefined && v !== '')
-      data[`agent.providers.${provider}.${field}`] = v;
-  });
+  const data: Record<string, any> = {};
+  for (const key of Object.keys(config.value)) {
+    // 提交 Agent 全部配置：含 embedding / notify / long_term / fallback / providers
+    if (!key.startsWith('agent.') || key === 'agent.test') continue;
+    const v = config.value[key];
+    if (v === undefined || v === '') continue;
+    data[key] = v;
+  }
   saveSection('ai', data);
 }
 
@@ -179,8 +181,11 @@ function saveLaboratory() {
       'laboratory.tmdb_cache_expire',
       'laboratory.use_douban_titles',
       'laboratory.search_multi_language',
+      'laboratory.ocr_enabled',
       'laboratory.ocr_server_host',
+      'laboratory.chrome_enabled',
       'laboratory.chrome_server_host',
+      'laboratory.chrome_admin_token',
     ]),
   );
 }
@@ -314,6 +319,15 @@ onMounted(() => {
             :config="config"
             :saving="saving === 'media'"
             @save="saveMedia"
+            @update-config="updateConfig"
+          />
+        </NTabPane>
+
+        <NTabPane name="rename" tab="重命名">
+          <RenameSection
+            :config="config"
+            :saving="saving === 'rename'"
+            @save="saveRename"
             @update-config="updateConfig"
           />
         </NTabPane>

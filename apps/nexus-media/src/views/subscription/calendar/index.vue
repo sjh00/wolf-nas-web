@@ -76,6 +76,13 @@ function handleEventClick(event: CalendarEvent) {
   detailModalShow.value = true;
 }
 
+function openTmdb(event: CalendarEvent) {
+  const id = String(event.id || '');
+  if (!id || !/^\d+$/.test(id)) return; // 豆瓣 DB: 前缀等非纯 TMDB id 不跳转
+  const type = event.type === 'movie' ? 'movie' : 'tv';
+  window.open(`https://www.themoviedb.org/${type}/${id}`, '_blank', 'noopener');
+}
+
 async function exportCalendar() {
   try {
     const res: any = await downloadSubscriptionCalendarIcsApi();
@@ -296,7 +303,13 @@ onUnmounted(() => {
                       }"
                     ></div>
                     <div class="event-info">
-                      <div class="event-title">{{ event.title }}</div>
+                      <div
+                        class="event-title"
+                        title="跳转到 TMDB"
+                        @click.stop="openTmdb(event)"
+                      >
+                        {{ event.title }}
+                      </div>
                       <div class="event-meta">
                         {{ event.type === 'movie' ? '电影' : '电视剧' }}
                         <span
@@ -440,6 +453,16 @@ onUnmounted(() => {
   border-radius: var(--n-border-radius);
 }
 
+/* naive NCalendar 默认固定 720px 高，事件卡片会溢出格子被裁掉：
+   改为高度自适应，行高最小 120px、按内容伸展，页面随窗口滚动 */
+.calendar-wrapper :deep(.n-calendar) {
+  height: auto;
+}
+
+.calendar-wrapper :deep(.n-calendar-dates) {
+  grid-auto-rows: minmax(120px, auto);
+}
+
 .calendar-events {
   display: flex;
   flex: 1;
@@ -492,6 +515,12 @@ onUnmounted(() => {
   font-weight: 500;
   color: var(--n-text-color);
   white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.event-title:hover {
+  color: hsl(var(--primary));
 }
 
 .event-meta {

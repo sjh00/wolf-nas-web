@@ -37,6 +37,27 @@ import PluginLogDrawer from './components/PluginLogDrawer.vue';
 
 const notification = useAppNotification();
 const router = useRouter();
+
+/** 标签配色：与插件市场一致，使用主题 --tag-* 语义色板，浅底深字 */
+const TAG_COLOR_VARS = [
+  '--tag-primary',
+  '--tag-quality',
+  '--tag-lang',
+  '--tag-audio',
+  '--tag-hdr',
+  '--tag-edition',
+] as const;
+
+function tagStyle(text?: string): { color: string; backgroundColor: string } {
+  let h = 0;
+  for (const ch of text ?? '') h = (h * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
+  const v = TAG_COLOR_VARS[h % TAG_COLOR_VARS.length];
+  return {
+    color: `hsl(var(${v}))`,
+    backgroundColor: `hsl(var(${v}) / 10%)`,
+  };
+}
+
 const loading = ref(false);
 const plugins = ref<any[]>([]);
 const viewMode = ref<'grid' | 'list'>('grid');
@@ -45,6 +66,9 @@ const activePlugin = ref<any>(null);
 const configShow = ref(false);
 const logShow = ref(false);
 const logPluginId = ref('');
+
+const isRemoteIcon = (icon?: string): boolean =>
+  !!icon && (icon.startsWith('http') || icon.startsWith('/'));
 
 const statusOptions = [
   { key: 'all', label: '全部' },
@@ -215,32 +239,55 @@ onMounted(fetchPlugins);
                   color: plugin.color || 'hsl(var(--primary))',
                 }"
               >
+                <img
+                  v-if="isRemoteIcon(plugin.icon)"
+                  :src="plugin.icon"
+                  class="h-6 w-6 object-contain"
+                  @error="($event.target as HTMLElement).style.display = 'none'"
+                />
                 <IconifyIcon
+                  v-else
                   :icon="plugin.icon || 'lucide:puzzle'"
                   class="h-6 w-6"
                 />
               </div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-1.5">
-                    <span class="installed-name truncate">{{
-                      plugin.name
-                    }}</span>
+                  <div class="flex min-w-0 flex-1 items-center gap-1.5">
+                    <span
+                      class="installed-name truncate"
+                      :title="plugin.name"
+                      >{{ plugin.name }}</span
+                    >
                     <NTag
                       v-if="plugin.is_builtin"
                       size="tiny"
                       :bordered="false"
-                      type="success"
+                      style="
+                        color: hsl(var(--tag-primary));
+                        background-color: hsl(var(--tag-primary) / 10%);
+                      "
+                      class="flex-shrink-0"
                     >
                       内置
                     </NTag>
-                    <NTag v-else size="tiny" :bordered="false" type="warning">
+                    <NTag
+                      v-else
+                      size="tiny"
+                      :bordered="false"
+                      style="
+                        color: hsl(var(--tag-default));
+                        background-color: hsl(var(--tag-default) / 10%);
+                      "
+                      class="flex-shrink-0"
+                    >
                       第三方
                     </NTag>
                   </div>
                   <NSwitch
                     :value="plugin.enabled"
                     size="small"
+                    class="flex-shrink-0"
                     @update:value="handleToggle(plugin)"
                   />
                 </div>
@@ -260,7 +307,7 @@ onMounted(fetchPlugins);
                 :key="tag"
                 size="tiny"
                 :bordered="false"
-                class="installed-tag"
+                :style="tagStyle(tag)"
               >
                 {{ tag }}
               </NTag>
@@ -269,7 +316,12 @@ onMounted(fetchPlugins);
             <!-- 底部操作 -->
             <div class="installed-footer">
               <div class="flex gap-2">
-                <NButton size="tiny" secondary @click="openConfig(plugin)">
+                <NButton
+                  v-if="plugin.has_config !== false"
+                  size="tiny"
+                  secondary
+                  @click="openConfig(plugin)"
+                >
                   <IconifyIcon
                     icon="lucide:settings"
                     class="mr-1 h-3 w-3"
@@ -339,20 +391,32 @@ onMounted(fetchPlugins);
                 color: plugin.color || 'hsl(var(--primary))',
               }"
             >
+              <img
+                v-if="isRemoteIcon(plugin.icon)"
+                :src="plugin.icon"
+                class="h-5 w-5 object-contain"
+                @error="($event.target as HTMLElement).style.display = 'none'"
+              />
               <IconifyIcon
+                v-else
                 :icon="plugin.icon || 'lucide:puzzle'"
                 class="h-5 w-5"
               />
             </div>
             <div class="list-row-info">
               <div class="list-row-name">
-                {{ plugin.name }}
+                <span class="min-w-0 flex-1 truncate" :title="plugin.name">{{
+                  plugin.name
+                }}</span>
                 <NTag
                   v-if="plugin.is_builtin"
                   size="tiny"
                   :bordered="false"
-                  type="success"
-                  class="ml-1"
+                  style="
+                    color: hsl(var(--tag-primary));
+                    background-color: hsl(var(--tag-primary) / 10%);
+                  "
+                  class="ml-1 flex-shrink-0"
                 >
                   内置
                 </NTag>
@@ -360,8 +424,11 @@ onMounted(fetchPlugins);
                   v-else
                   size="tiny"
                   :bordered="false"
-                  type="warning"
-                  class="ml-1"
+                  style="
+                    color: hsl(var(--tag-default));
+                    background-color: hsl(var(--tag-default) / 10%);
+                  "
+                  class="ml-1 flex-shrink-0"
                 >
                   第三方
                 </NTag>
@@ -376,11 +443,17 @@ onMounted(fetchPlugins);
             <NSwitch
               :value="plugin.enabled"
               size="small"
+              class="flex-shrink-0"
               @update:value="handleToggle(plugin)"
             />
           </div>
           <div class="list-row-actions">
-            <NButton size="tiny" secondary @click="openConfig(plugin)">
+            <NButton
+              v-if="plugin.has_config !== false"
+              size="tiny"
+              secondary
+              @click="openConfig(plugin)"
+            >
               <IconifyIcon icon="lucide:settings" class="mr-1 h-3 w-3" />配置
             </NButton>
             <NButton size="tiny" secondary @click="openLogs(plugin.id)">
@@ -569,14 +642,6 @@ onMounted(fetchPlugins);
   gap: 0.375rem;
 }
 
-:deep(.installed-tag) {
-  height: 1.375rem;
-  padding: 0 0.375rem;
-  font-size: 0.6875rem;
-  color: hsl(var(--muted-foreground));
-  background-color: hsl(var(--muted) / 25%);
-}
-
 .installed-footer {
   display: flex;
   flex-wrap: wrap;
@@ -635,8 +700,10 @@ onMounted(fetchPlugins);
 }
 
 .list-row-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   font-size: 0.9375rem;
   font-weight: 600;
   color: hsl(var(--card-foreground));
@@ -660,8 +727,15 @@ onMounted(fetchPlugins);
 
 .list-row-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   padding-left: 3.25rem;
+}
+
+@media (max-width: 640px) {
+  .list-row-actions {
+    padding-left: 0;
+  }
 }
 
 @media (min-width: 640px) {

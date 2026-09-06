@@ -35,6 +35,7 @@ export namespace SubscriptionApi {
     filter_rule?: number | string;
     filter_include?: string;
     filter_exclude?: string;
+    filter_free?: boolean;
     download_setting?: number | string;
     rss_sites?: string[];
     search_sites?: string[];
@@ -182,11 +183,24 @@ export async function addSubscriptionMediaApi(data: {
   return requestClient.post('/subscription/add', data);
 }
 
+/** 获取电视剧某剧集已订阅的季号列表 */
+export async function getSubscribedSeasonsApi(data: {
+  name?: string;
+  tmdbid?: number | string;
+  year?: string;
+}) {
+  return requestClient.post<{ seasons: number[] }>('/subscription/tv/seasons', {
+    ...data,
+    tmdbid: data.tmdbid ? String(data.tmdbid) : undefined,
+  });
+}
+
 /** 取消订阅 */
 export async function removeSubscriptionApi(data: {
   name: string;
   page?: string;
   rssid?: number | string;
+  season?: number | string;
   tmdbid?: number | string;
   type: string;
   year?: string;
@@ -194,6 +208,7 @@ export async function removeSubscriptionApi(data: {
   return requestClient.post('/subscription/remove', {
     ...data,
     rssid: toRssId(data.rssid),
+    season: data.season == null ? undefined : String(data.season),
     tmdbid: data.tmdbid ? String(data.tmdbid) : undefined,
   });
 }

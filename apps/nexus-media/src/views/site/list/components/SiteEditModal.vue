@@ -1,11 +1,12 @@
 <script lang="ts" setup>
-import type { SiteForm, SiteItem } from '../types';
+import type { SiteDefinition, SiteForm, SiteItem } from '../types';
 
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
 import {
+  NAutoComplete,
   NButton,
   NCollapse,
   NCollapseItem,
@@ -13,6 +14,8 @@ import {
   NFormItem,
   NInput,
   NModal,
+  NRadioButton,
+  NRadioGroup,
   NSelect,
   NSpace,
   NSwitch,
@@ -23,6 +26,7 @@ import {
 interface Props {
   show: boolean;
   site: null | SiteForm;
+  definitions: SiteDefinition[];
   filterGroups: any[];
   downloadSettings: any[];
 }
@@ -96,9 +100,15 @@ const featureSwitches = computed(() => {
     },
     {
       key: 'chrome' as const,
-      label: '浏览器仿真',
-      desc: '模拟浏览器访问站点',
+      label: '浏览器自动化',
+      desc: '模拟浏览器访问站点（可过 Cloudflare）',
       icon: 'lucide:chrome',
+    },
+    {
+      key: 'browser_persistent' as const,
+      label: '保持浏览器会话',
+      desc: '请求后保留浏览器认证会话（如 2FA 站点），需开启浏览器自动化',
+      icon: 'lucide:lock-keyhole',
     },
     {
       key: 'proxy' as const,
@@ -125,6 +135,63 @@ const featureSwitches = computed(() => {
   );
 });
 
+const isNewSite = computed(() => !props.site?.id);
+
+const definitionOptions = computed(() => {
+  return props.definitions.map((d) => ({
+    label: `${d.name} · ${d.domain.replace(/^https?:\/\//, '')}`,
+    value: d.name,
+    domain: d.domain,
+    type: d.type,
+    public: d.public,
+    domain_aliases: d.domain_aliases,
+  }));
+});
+
+const matchedDefinition = computed(() => {
+  if (!props.site?.name) return null;
+  const name = props.site.name.toLowerCase();
+  return (
+    props.definitions.find(
+      (d) => d.name.toLowerCase() === name || d.id.toLowerCase() === name,
+    ) || null
+  );
+});
+
+const domainOptions = computed(() => {
+  if (!matchedDefinition.value) return [];
+  const def = matchedDefinition.value;
+  const urls = [def.domain, ...(def.domain_aliases || [])].map((url) =>
+    /^https?:\/\//.test(url) ? url : `https://${url}`,
+  );
+  const uniqueUrls = [...new Set(urls)];
+  return uniqueUrls.map((url) => ({
+    label: url,
+    value: url,
+  }));
+});
+
+function handleDefinitionChange(name: string) {
+  const def = props.definitions.find((d) => d.name === name || d.id === name);
+  if (!def || !props.site) return;
+  emit('update:site', {
+    ...props.site,
+    name: def.name,
+    signurl: def.domain,
+    public: def.public,
+    site_public: def.public,
+  });
+}
+
+function definitionFilter(pattern: string, option: any) {
+  const p = pattern.toLowerCase();
+  return (
+    option.label.toLowerCase().includes(p) ||
+    option.domain?.toLowerCase().includes(p) ||
+    option.domain_aliases?.some((a: string) => a.toLowerCase().includes(p))
+  );
+}
+
 function updateField<K extends keyof SiteForm>(key: K, value: SiteForm[K]) {
   if (!props.site) return;
   emit('update:site', { ...props.site, [key]: value });
@@ -133,6 +200,102 @@ function updateField<K extends keyof SiteForm>(key: K, value: SiteForm[K]) {
 function handleSave() {
   emit('save');
 }
+
+// ---------- 高级请求头：KV 编辑 / JSON 批量模式 ----------
+
+type HeaderMode = 'json' | 'kv';
+
+interface HeaderRow {
+  key: string;
+  value: string;
+}
+
+const headerMode = ref<HeaderMode>('kv');
+const headerRows = ref<HeaderRow[]>([]);
+
+function stringifyHeaders(headers: null | object | string | undefined): string {
+  if (!headers) return '';
+  if (typeof headers === 'string') return headers;
+  try {
+    return JSON.stringify(headers);
+  } catch {
+    return '';
+  }
+}
+
+function parseHeadersToRows(
+  headers: null | object | string | undefined,
+): HeaderRow[] {
+  let obj: Record<string, string> = {};
+  if (typeof headers === 'string') {
+    const trimmed = headers.trim();
+    if (trimmed) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          obj = parsed;
+        }
+      } catch {
+        obj = {};
+      }
+    }
+  } else if (headers && typeof headers === 'object') {
+    obj = headers as Record<string, string>;
+  }
+  return Object.entries(obj).map(([key, value]) => ({
+    key,
+    value: String(value),
+  }));
+}
+
+function commitHeaderRows() {
+  const obj: Record<string, string> = {};
+  for (const row of headerRows.value) {
+    const key = row.key?.trim();
+    if (key) obj[key] = row.value ?? '';
+  }
+  const json = JSON.stringify(obj);
+  const next = json === '{}' ? '' : json;
+  if (next !== (props.site?.headers || '')) updateField('headers', next);
+}
+
+function syncHeaderRows() {
+  headerRows.value = parseHeadersToRows(props.site?.headers || '');
+}
+
+function addHeaderRow() {
+  headerRows.value.push({ key: '', value: '' });
+  commitHeaderRows();
+}
+
+function removeHeaderRow(index: number) {
+  headerRows.value.splice(index, 1);
+  commitHeaderRows();
+}
+
+function updateHeaderRow(index: number, field: keyof HeaderRow, value: string) {
+  const row = headerRows.value[index];
+  if (!row) return;
+  row[field] = value;
+  commitHeaderRows();
+}
+
+function switchHeaderMode(mode: HeaderMode) {
+  if (mode === headerMode.value) return;
+  if (mode === 'kv') {
+    commitHeaderRows();
+    syncHeaderRows();
+  }
+  headerMode.value = mode;
+}
+
+// 弹窗打开时按站点现有 headers 初始化 KV 行
+watch(
+  () => props.show,
+  (value) => {
+    if (value) syncHeaderRows();
+  },
+);
 
 function parseSiteToForm(item: SiteItem): SiteForm {
   const note = item.note || {};
@@ -165,11 +328,12 @@ function parseSiteToForm(item: SiteItem): SiteForm {
     parse: !!parsedNote?.parse,
     unread_msg_notify: !!parsedNote?.message,
     chrome: !!parsedNote?.chrome,
+    browser_persistent: !!parsedNote?.browser_persistent,
     proxy: !!parsedNote?.proxy,
     subtitle: !!parsedNote?.subtitle,
     tag: !!parsedNote?.tag,
     ua: parsedNote?.ua || '',
-    headers: item.headers || parsedNote?.headers || '',
+    headers: stringifyHeaders(item.headers || parsedNote?.headers || ''),
     rule: parsedNote?.rule || '',
     download_setting: parsedNote?.download_setting || '',
     rate_limit: parsedNote?.rate_limit || '10/m',
@@ -185,6 +349,7 @@ function buildNote(form: SiteForm): string {
   if (form.ua) note.ua = form.ua;
   if (form.headers) note.headers = form.headers;
   note.chrome = form.chrome;
+  note.browser_persistent = form.browser_persistent;
   note.proxy = form.proxy;
   note.message = form.unread_msg_notify;
   note.subtitle = form.subtitle;
@@ -252,6 +417,28 @@ defineExpose({
       <NTabs v-model:value="activeTab" type="line" class="edit-tabs">
         <NTabPane name="basic" tab="基础信息">
           <div class="tab-panel">
+            <NFormItem v-if="isNewSite" label="选择站点">
+              <NSelect
+                :value="site.name"
+                :options="definitionOptions"
+                :filter="definitionFilter"
+                placeholder="请选择站点定义"
+                clearable
+                filterable
+                @update:value="handleDefinitionChange"
+              />
+            </NFormItem>
+            <NFormItem v-else-if="matchedDefinition" label="站点定义">
+              <div class="definition-text">
+                <span class="definition-text-name">{{
+                  matchedDefinition.name
+                }}</span>
+                <span class="definition-text-separator">·</span>
+                <span class="definition-text-domain">{{
+                  matchedDefinition.domain.replace(/^https?:\/\//, '')
+                }}</span>
+              </div>
+            </NFormItem>
             <div class="form-grid-2">
               <NFormItem label="名称" required>
                 <NInput
@@ -263,29 +450,29 @@ defineExpose({
               <NFormItem label="优先级" required>
                 <NInput
                   :value="site.pri"
-                  placeholder="1-50，越小优先级越高"
+                  placeholder="1-50，越小优先级越高，主站建议 1"
                   @update:value="(v) => updateField('pri', v)"
                 />
               </NFormItem>
             </div>
             <NFormItem label="站点地址" required>
-              <NInput
+              <NAutoComplete
                 :value="site.signurl"
+                :options="domainOptions"
                 placeholder="https://example.com"
                 @update:value="(v) => updateField('signurl', v)"
               />
             </NFormItem>
             <div class="form-grid-2">
               <NFormItem label="站点类型">
-                <div class="inline-flex items-center gap-2">
-                  <NSwitch
-                    :value="site.public"
-                    @update:value="(v) => updateField('public', v)"
-                  />
-                  <span class="type-hint">
-                    {{ site.public ? 'BT站点（公开）' : 'PT站点（私有）' }}
-                  </span>
-                </div>
+                <NRadioGroup
+                  :value="site.public"
+                  size="small"
+                  @update:value="(v) => updateField('public', v)"
+                >
+                  <NRadioButton :value="false"> PT </NRadioButton>
+                  <NRadioButton :value="true"> BT </NRadioButton>
+                </NRadioGroup>
               </NFormItem>
               <NFormItem label="过滤规则">
                 <NSelect
@@ -343,14 +530,83 @@ defineExpose({
             </div>
             <NCollapse class="auth-advanced">
               <NCollapseItem title="高级请求头">
-                <NFormItem label="自定义请求头 (JSON)">
-                  <NInput
-                    :value="site.headers"
-                    type="textarea"
-                    :rows="3"
-                    placeholder='自定义请求头参数，格式 {"xxx": "xxx"}'
-                    @update:value="(v) => updateField('headers', v)"
-                  />
+                <NFormItem label="自定义请求头">
+                  <div class="header-editor">
+                    <NRadioGroup
+                      :value="headerMode"
+                      size="small"
+                      class="header-editor-mode"
+                      @update:value="switchHeaderMode"
+                    >
+                      <NRadioButton value="kv"> 键值编辑 </NRadioButton>
+                      <NRadioButton value="json"> JSON 模式 </NRadioButton>
+                    </NRadioGroup>
+
+                    <div v-if="headerMode === 'kv'" class="header-kv-editor">
+                      <div
+                        v-for="(row, index) in headerRows"
+                        :key="index"
+                        class="header-kv-row"
+                      >
+                        <NInput
+                          :value="row.key"
+                          size="small"
+                          placeholder="请求头名称"
+                          @update:value="
+                            (v) => updateHeaderRow(index, 'key', v)
+                          "
+                        />
+                        <NInput
+                          :value="row.value"
+                          size="small"
+                          placeholder="请求头值"
+                          @update:value="
+                            (v) => updateHeaderRow(index, 'value', v)
+                          "
+                        />
+                        <NButton
+                          quaternary
+                          circle
+                          size="small"
+                          :aria-label="`删除请求头 ${row.key || index + 1}`"
+                          @click="removeHeaderRow(index)"
+                        >
+                          <template #icon>
+                            <IconifyIcon
+                              icon="lucide:trash-2"
+                              class="h-4 w-4"
+                            />
+                          </template>
+                        </NButton>
+                      </div>
+                      <div
+                        class="header-kv-empty"
+                        v-if="headerRows.length === 0"
+                      >
+                        暂无自定义请求头，点击下方按钮添加
+                      </div>
+                      <NButton
+                        size="small"
+                        secondary
+                        class="header-kv-add"
+                        @click="addHeaderRow"
+                      >
+                        <template #icon>
+                          <IconifyIcon icon="lucide:plus" class="h-4 w-4" />
+                        </template>
+                        添加请求头
+                      </NButton>
+                    </div>
+
+                    <NInput
+                      v-else
+                      :value="site.headers"
+                      type="textarea"
+                      :rows="3"
+                      placeholder='自定义请求头参数，格式 {"xxx": "xxx"}'
+                      @update:value="(v) => updateField('headers', v)"
+                    />
+                  </div>
                 </NFormItem>
               </NCollapseItem>
             </NCollapse>
@@ -469,23 +725,6 @@ defineExpose({
   padding-top: 0.25rem;
 }
 
-.type-hint {
-  font-size: 0.75rem;
-  color: hsl(var(--muted-foreground));
-}
-
-.inline-flex {
-  display: inline-flex;
-}
-
-.items-center {
-  align-items: center;
-}
-
-.gap-2 {
-  gap: 0.5rem;
-}
-
 .form-hint {
   display: flex;
   gap: 0.375rem;
@@ -516,9 +755,44 @@ defineExpose({
   color: hsl(var(--muted-foreground));
 }
 
+.header-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.header-editor-mode {
+  align-self: flex-start;
+}
+
+.header-kv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.header-kv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.header-kv-empty {
+  padding: 0.25rem 0;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.header-kv-add {
+  align-self: flex-start;
+  margin-top: 0.125rem;
+}
+
 .switch-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.625rem;
 }
 
@@ -526,11 +800,17 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   padding: 0.625rem 0.75rem;
+  overflow: hidden;
   background-color: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
   transition: all 0.2s ease;
+}
+
+.switch-card :deep(.n-switch) {
+  flex-shrink: 0;
 }
 
 .switch-card:hover {
@@ -591,6 +871,33 @@ defineExpose({
   white-space: nowrap;
 }
 
+.definition-text {
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: baseline;
+  padding: 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+.definition-text-name {
+  font-weight: 600;
+  color: hsl(var(--card-foreground));
+}
+
+.definition-text-separator {
+  color: hsl(var(--muted-foreground));
+}
+
+.definition-text-domain {
+  color: hsl(var(--muted-foreground));
+}
+
+.aliases-label {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
 @media (max-width: 640px) {
   .site-edit-modal :deep(.n-card__content) {
     padding: 0.5rem 0.625rem;
@@ -599,6 +906,10 @@ defineExpose({
   .form-grid-2,
   .switch-grid {
     grid-template-columns: 1fr;
+  }
+
+  .header-kv-row {
+    grid-template-columns: 1fr 1fr auto;
   }
 
   .switch-card {
