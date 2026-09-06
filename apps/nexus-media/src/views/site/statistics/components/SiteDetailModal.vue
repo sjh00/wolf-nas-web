@@ -28,7 +28,18 @@ const activityData = ref<[number, number, number, number, number, number][]>(
   [],
 );
 const chartDetailRef = ref<any>(null);
-const { renderEcharts: renderDetail } = useEcharts(chartDetailRef);
+const { getChartInstance, renderEcharts: renderDetail } =
+  useEcharts(chartDetailRef);
+
+/** 选中的单条曲线名，空串表示全部显示 */
+const selectedSeries = ref('');
+
+/** 积分曲线独立色（青色），与做种数蓝色区分 */
+const BONUS_COLOR = 'hsl(188, 80%, 55%)';
+
+function isDimmed(name: string): boolean {
+  return selectedSeries.value !== '' && selectedSeries.value !== name;
+}
 
 const visible = computed({
   get: () => props.show,
@@ -66,13 +77,18 @@ function renderDetailChart() {
   const seedingSizes = activityData.value.map((i) => i[5]);
   const colors = getThemeColors();
 
-  renderDetail({
+  const option = {
     tooltip: {
       trigger: 'axis',
       formatter: (params: any) => {
+        const list = Array.isArray(params) ? params : [params];
+        const items = selectedSeries.value
+          ? list.filter((p: any) => p.seriesName === selectedSeries.value)
+          : list;
+        if (items.length === 0) return '';
         const textColor = colors.cardForeground;
-        let result = `<div style="font-weight:600;margin-bottom:4px;color:${textColor}">${params[0].name}</div>`;
-        params.forEach((p: any) => {
+        let result = `<div style="font-weight:600;margin-bottom:4px;color:${textColor}">${items[0].name}</div>`;
+        items.forEach((p: any) => {
           let val: number | string = p.value;
           if (p.seriesName === '做种体积') val = formatSize(val as number);
           else if (p.seriesName !== '做种数' && p.seriesName !== '积分')
@@ -123,8 +139,17 @@ function renderDetailChart() {
       },
       {
         type: 'value',
-        name: '数量',
+        name: '做种数',
         position: 'right',
+        nameTextStyle: { color: colors.mutedForeground },
+        axisLabel: { color: colors.mutedForeground },
+        splitLine: { show: false },
+      },
+      {
+        type: 'value',
+        name: '积分',
+        position: 'right',
+        offset: 60,
         nameTextStyle: { color: colors.mutedForeground },
         axisLabel: { color: colors.mutedForeground },
         splitLine: { show: false },
@@ -137,8 +162,13 @@ function renderDetailChart() {
         data: uploads,
         smooth: true,
         showSymbol: false,
+        emphasis: { disabled: true },
         itemStyle: { color: colors.success },
-        areaStyle: { color: colors.success, opacity: 0.1 },
+        lineStyle: { opacity: isDimmed('上传') ? 0.15 : 1 },
+        areaStyle: {
+          color: colors.success,
+          opacity: isDimmed('上传') ? 0.02 : 0.1,
+        },
         yAxisIndex: 0,
       },
       {
@@ -147,8 +177,13 @@ function renderDetailChart() {
         data: downloads,
         smooth: true,
         showSymbol: false,
+        emphasis: { disabled: true },
         itemStyle: { color: colors.destructive },
-        areaStyle: { color: colors.destructive, opacity: 0.1 },
+        lineStyle: { opacity: isDimmed('下载') ? 0.15 : 1 },
+        areaStyle: {
+          color: colors.destructive,
+          opacity: isDimmed('下载') ? 0.02 : 0.1,
+        },
         yAxisIndex: 0,
       },
       {
@@ -157,7 +192,9 @@ function renderDetailChart() {
         data: seedings,
         smooth: true,
         showSymbol: false,
+        emphasis: { disabled: true },
         itemStyle: { color: colors.primary },
+        lineStyle: { opacity: isDimmed('做种数') ? 0.15 : 1 },
         yAxisIndex: 1,
       },
       {
@@ -166,7 +203,9 @@ function renderDetailChart() {
         data: seedingSizes,
         smooth: true,
         showSymbol: false,
+        emphasis: { disabled: true },
         itemStyle: { color: colors.warning },
+        lineStyle: { opacity: isDimmed('做种体积') ? 0.15 : 1 },
         yAxisIndex: 0,
       },
       {
@@ -175,17 +214,146 @@ function renderDetailChart() {
         data: bonuses,
         smooth: true,
         showSymbol: false,
-        itemStyle: { color: colors.primary },
-        yAxisIndex: 1,
+        emphasis: { disabled: true },
+        itemStyle: { color: BONUS_COLOR },
+        lineStyle: { opacity: isDimmed('积分') ? 0.15 : 1 },
+        yAxisIndex: 2,
       },
     ],
+  };
+
+  // 通过 renderEcharts 渲染；lineStyle.opacity 控制折线透明度实现置灰
+  renderDetail(option as any).then(() => {
+    bindDetailChart(uploads, downloads, seedings, seedingSizes, bonuses);
   });
+}
+
+function bindDetailChart(
+  uploads: number[],
+  downloads: number[],
+  seedings: number[],
+  seedingSizes: number[],
+  bonuses: number[],
+) {
+  const inst = getChartInstance();
+  if (!inst) return;
+
+  // zrender 底层事件绑定（inst.on('click') 在弹窗场景可能不触发）
+  const zr = inst.getZr();
+  if (zr) {
+    zr.off('click');
+    zr.on('click', (event: any) => {
+      if (!event || typeof event.offsetX !== 'number') return;
+      handleSelectClick(
+        {
+          componentType: 'zr',
+          offsetX: event.offsetX,
+          offsetY: event.offsetY,
+        },
+        inst,
+        uploads,
+        downloads,
+        seedings,
+        seedingSizes,
+        bonuses,
+      );
+    });
+  }
+  // 点击选中单条曲线（或图例项），其余置灰；再次点击同一条恢复
+  inst.off('click');
+  inst.on('click', (params: any) => {
+    handleSelectClick(
+      params,
+      inst,
+      uploads,
+      downloads,
+      seedings,
+      seedingSizes,
+      bonuses,
+    );
+  });
+
+  // 图例隐藏某条曲线时，同步隐藏对应右侧坐标轴名称，避免残留
+  inst.off('legendselectchanged');
+  inst.on('legendselectchanged', (params: any) => {
+    const sel: Record<string, boolean> = params?.selected || {};
+    inst.setOption({
+      yAxis: [
+        {},
+        { name: sel['做种数'] === false ? '' : '做种数' },
+        { name: sel['积分'] === false ? '' : '积分' },
+      ],
+    });
+  });
+}
+
+function handleSelectClick(
+  params: any,
+  inst: any,
+  uploads: number[],
+  downloads: number[],
+  seedings: number[],
+  seedingSizes: number[],
+  bonuses: number[],
+) {
+  if (params?.componentType === 'legend') {
+    // 图例点击保持默认隐藏/显示行为，不参与曲线选中
+    return;
+  }
+  let name = String(params?.seriesName ?? '');
+  if (!name && params?.offsetX != null && params?.offsetY != null) {
+    try {
+      const names = ['上传', '下载', '做种数', '做种体积', '积分'];
+      const allVals = [uploads, downloads, seedings, seedingSizes, bonuses];
+      let best = '';
+      let bestDist = Number.POSITIVE_INFINITY;
+      names.forEach((n, idx) => {
+        // 逐系列转换：使用该系列自己的 y 轴刻度换算点击值，避免跨轴比较错误
+        const coord = inst.convertFromPixel({ seriesIndex: idx }, [
+          params.offsetX,
+          params.offsetY,
+        ]);
+        if (
+          !coord ||
+          !Array.isArray(coord) ||
+          coord.length < 2 ||
+          coord[0] == null ||
+          coord[1] == null
+        ) {
+          return;
+        }
+        const xIndex = Math.round(coord[0]);
+        const clickedValue = coord[1];
+        const vals = allVals[idx];
+        if (!vals || vals[xIndex] == null) return;
+        const dist = Math.abs(clickedValue - vals[xIndex]);
+        const max = Math.max(...vals);
+        const min = Math.min(...vals);
+        // 该系列自身跨度 12% 内才算命中
+        if (dist <= (max - min) * 0.12 && dist < bestDist) {
+          bestDist = dist;
+          best = n;
+        }
+      });
+      if (best) {
+        name = best;
+      }
+    } catch {
+      // 忽略坐标转换异常
+    }
+  }
+  if (!name) return;
+  selectedSeries.value = selectedSeries.value === name ? '' : name;
+  renderDetailChart();
 }
 
 watch(
   () => [props.show, props.siteName],
   ([show]) => {
-    if (show) fetchActivity();
+    if (show) {
+      selectedSeries.value = '';
+      fetchActivity();
+    }
   },
 );
 </script>

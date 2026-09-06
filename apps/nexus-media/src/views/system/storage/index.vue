@@ -92,7 +92,7 @@ function defaultConfig(type: string): Record<string, any> {
   if (!schema) return {};
   const obj: Record<string, any> = {};
   for (const f of schema.fields) {
-    obj[f.key] = '';
+    obj[f.key] = f.type === 'bool' ? false : '';
   }
   return obj;
 }
@@ -148,7 +148,7 @@ async function save() {
     return;
   }
   for (const fd of currentFields.value) {
-    if (fd.required && !f.config[fd.key]?.trim?.()) {
+    if (fd.required && fd.type !== 'bool' && !f.config[fd.key]?.trim?.()) {
       message.error(`${fd.label} 不能为空`);
       return;
     }
@@ -426,26 +426,49 @@ onMounted(fetch);
         :native-scrollbar="false"
       >
         <NForm label-placement="top" size="medium">
-          <NFormItem label="名称" required>
-            <NInput
-              v-model:value="drawer.form.name"
-              placeholder="例如：冷存储 S3"
-              clearable
+          <!-- 名称与启用开关同一行 -->
+          <div class="mb-5">
+            <label
+              class="mb-1.5 block text-sm font-medium"
+              style="color: hsl(var(--foreground))"
             >
-              <template #prefix>
-                <IconifyIcon
-                  icon="lucide:tag"
-                  class="size-4"
-                  style="color: hsl(var(--muted-foreground))"
+              名称
+              <span class="ml-0.5 text-destructive">*</span>
+            </label>
+            <div class="flex items-center gap-3">
+              <NInput
+                v-model:value="drawer.form.name"
+                placeholder="例如：冷存储 S3"
+                clearable
+                class="flex-1"
+              >
+                <template #prefix>
+                  <IconifyIcon
+                    icon="lucide:tag"
+                    class="size-4"
+                    style="color: hsl(var(--muted-foreground))"
+                  />
+                </template>
+              </NInput>
+              <div class="flex shrink-0 items-center gap-2">
+                <NSwitch
+                  v-model:value="drawer.form.enabled"
+                  :checked-value="1"
+                  :unchecked-value="0"
+                  size="small"
                 />
-              </template>
-            </NInput>
-          </NFormItem>
+                <span class="text-sm" style="color: hsl(var(--foreground))"
+                  >启用</span
+                >
+              </div>
+            </div>
+          </div>
 
           <NFormItem label="类型" required>
             <NSelectWithPrefix
               v-model:value="drawer.form.type"
               :options="types"
+              :disabled="drawer.isEdit"
               placeholder="选择存储类型"
               @update:value="
                 drawer.form.config = defaultConfig($event);
@@ -484,7 +507,13 @@ onMounted(fetch);
                 :label="fd.label"
                 :required="fd.required"
               >
+                <NSwitch
+                  v-if="fd.type === 'bool'"
+                  v-model:value="drawer.form.config[fd.key]"
+                  @update:value="testResult = null"
+                />
                 <NInput
+                  v-else
                   v-model:value="drawer.form.config[fd.key]"
                   :placeholder="fd.placeholder"
                   clearable
@@ -528,17 +557,6 @@ onMounted(fetch);
             >
               {{ testResult.msg }}
             </span>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <NSwitch
-              v-model:value="drawer.form.enabled"
-              :checked-value="1"
-              :unchecked-value="0"
-            />
-            <span class="text-sm" style="color: hsl(var(--foreground))"
-              >启用</span
-            >
           </div>
         </NForm>
 

@@ -29,7 +29,13 @@ export namespace DownloadApi {
     match_path?: number;
     rmt_mode?: string;
     config?: string;
-    download_dir?: string;
+    download_dir?: Array<{
+      category?: string;
+      container_path?: string;
+      label?: string;
+      save_path?: string;
+      type?: string;
+    }>;
   }
 
   export interface DownloadSetting {
@@ -93,6 +99,7 @@ export namespace DownloadApi {
     image: string;
     overview: string;
     enclosure?: string;
+    season_episode?: string;
     date: string;
     site: string;
   }
@@ -114,11 +121,12 @@ export async function getDownloadTasksApi(
 }
 
 /** 获取下载历史 */
-export async function getDownloadHistoryApi(page?: number, _pageSize?: number) {
+export async function getDownloadHistoryApi(page?: number, pageSize?: number) {
   return requestClient.post<DownloadApi.DownloadHistoryItem[]>(
     '/media/library/downloaded',
     {
       page,
+      page_size: pageSize || 30,
     },
   );
 }
@@ -162,11 +170,17 @@ export async function batchDeleteTasksApi(
   });
 }
 
-/** 获取下载器配置列表 */
-export async function getDownloadersApi(did?: string) {
+/** 获取下载器配置列表（brush=true 仅返回支持刷流的下载器） */
+export async function getDownloadersApi(did?: string, brush = false) {
   return requestClient.post<Record<string, DownloadApi.DownloaderConfig>>(
     '/download/downloaders',
-    { did },
+    { did, brush },
+  );
+}
+
+export async function getDownloadersSimpleApi() {
+  return requestClient.post<{ id: string; name: string }[]>(
+    '/download/downloaders/simple',
   );
 }
 
@@ -199,6 +213,15 @@ export async function deleteDownloaderApi(id: string) {
 /** 测试下载器配置 */
 export async function testDownloaderApi(type: string, config: string) {
   return requestClient.post('/download/downloaders/test', { type, config });
+}
+
+/** 浏览下载器目录（通过下载器 API 读取默认保存路径、分类路径、已有种子路径） */
+export async function browseDownloaderDirsApi(type: string, config: string) {
+  return requestClient.post<{ count: number; items: string[] }>(
+    '/download/downloaders/browse_dirs',
+    { type, config },
+    { timeout: 60_000 },
+  );
 }
 
 /** 检查下载器 */

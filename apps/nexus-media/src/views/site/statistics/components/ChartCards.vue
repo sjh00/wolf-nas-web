@@ -1,7 +1,9 @@
 <script lang="ts" setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
-import { NCard, NEmpty } from 'naive-ui';
+import { IconifyIcon } from '@vben/icons';
+
+import { NButton, NCard, NEmpty, NPopover, NSelect, NTag } from 'naive-ui';
 
 import { type StatisticsItem, useSiteStats } from '#/composables/useSiteStats';
 
@@ -10,6 +12,7 @@ import SiteHistoryTrendChart from './SiteHistoryTrendChart.vue';
 import SiteSeedingRoseChart from './SiteSeedingRoseChart.vue';
 import SiteTrafficBarChart from './SiteTrafficBarChart.vue';
 import SiteUploadPieChart from './SiteUploadPieChart.vue';
+import TodayTrafficCard from './TodayTrafficCard.vue';
 
 interface DailySeries {
   download: number[];
@@ -30,6 +33,23 @@ const emit = defineEmits<{
 }>();
 
 const { parseSize } = useSiteStats();
+
+/** 站点联动选中项，空串表示未筛选 */
+const selectedSite = ref('');
+
+/** 近30天趋势"只看站点"多选筛选 */
+const focusSites = ref<string[]>([]);
+
+const focusSiteOptions = computed(() =>
+  props.statistics
+    .map((i) => ({ label: i.site_name, value: i.site_name }))
+    .toSorted((a, b) => a.label.localeCompare(b.label, 'zh')),
+);
+
+// 图表点击：传 '' 表示清除，传站点名表示选中
+function onSelectSite(site: string) {
+  selectedSite.value = site;
+}
 
 const barLabels = computed(() => props.statistics.map((i) => i.site_name));
 const barUploads = computed(() =>
@@ -60,6 +80,21 @@ const seedingRoseData = computed(() =>
 
 <template>
   <div class="charts-layout">
+    <div v-if="selectedSite" class="filter-bar">
+      <span class="filter-text">
+        已聚焦：<NTag size="small" :bordered="false">{{ selectedSite }}</NTag>
+      </span>
+      <NButton size="tiny" quaternary type="primary" @click="selectedSite = ''">
+        清除筛选
+      </NButton>
+    </div>
+
+    <TodayTrafficCard
+      v-if="dailyData.series.length > 0"
+      :daily-data="dailyData"
+      class="chart-card-full"
+    />
+
     <NCard
       :bordered="false"
       :segmented="{ content: true }"
@@ -69,8 +104,10 @@ const seedingRoseData = computed(() =>
       <SiteTrafficBarChart
         v-if="statistics.length > 0"
         :labels="barLabels"
+        :selected-site="selectedSite"
         :upload-data="barUploads"
         :download-data="barDownloads"
+        @select-site="onSelectSite"
       />
       <NEmpty v-else description="暂无站点流量数据" />
     </NCard>
@@ -86,6 +123,8 @@ const seedingRoseData = computed(() =>
         :labels="trendLabels"
         :upload-data="trendUploads"
         :download-data="trendDownloads"
+        :selected-site="selectedSite"
+        @select-site="onSelectSite"
       />
       <NEmpty v-else description="暂无近7天流量数据" />
     </NCard>
@@ -99,6 +138,8 @@ const seedingRoseData = computed(() =>
       <SiteUploadPieChart
         v-if="uploadPieData.length > 0"
         :data="uploadPieData"
+        :selected-site="selectedSite"
+        @select-site="onSelectSite"
       />
       <NEmpty v-else description="暂无上传量数据" />
     </NCard>
@@ -107,11 +148,13 @@ const seedingRoseData = computed(() =>
       :bordered="false"
       :segmented="{ content: true }"
       class="chart-card"
-      title="做种数分布（玫瑰图）"
+      title="做种数分布"
     >
       <SiteSeedingRoseChart
         v-if="seedingRoseData.length > 0"
         :data="seedingRoseData"
+        :selected-site="selectedSite"
+        @select-site="onSelectSite"
       />
       <NEmpty v-else description="暂无做种数据" />
     </NCard>
@@ -124,25 +167,49 @@ const seedingRoseData = computed(() =>
       title="近30天各站点流量趋势"
     >
       <template #header-extra>
-        <div class="mode-toggle">
-          <button
-            :class="{ active: dailyMode === 'upload' }"
-            @click="emit('update:dailyMode', 'upload')"
-          >
-            上传
-          </button>
-          <button
-            :class="{ active: dailyMode === 'download' }"
-            @click="emit('update:dailyMode', 'download')"
-          >
-            下载
-          </button>
+        <div class="chart-actions">
+          <div class="mode-toggle">
+            <button
+              :class="{ active: dailyMode === 'upload' }"
+              @click="emit('update:dailyMode', 'upload')"
+            >
+              上传
+            </button>
+            <button
+              :class="{ active: dailyMode === 'download' }"
+              @click="emit('update:dailyMode', 'download')"
+            >
+              下载
+            </button>
+          </div>
+          <NPopover placement="bottom-end" trigger="click">
+            <template #trigger>
+              <NButton size="tiny" quaternary circle type="primary">
+                <template #icon>
+                  <IconifyIcon icon="lucide:filter" class="h-4 w-4" />
+                </template>
+              </NButton>
+            </template>
+            <NSelect
+              v-model:value="focusSites"
+              :options="focusSiteOptions"
+              multiple
+              clearable
+              filterable
+              placeholder="筛选站点（可多选）"
+              size="small"
+              style="width: 13rem"
+            />
+          </NPopover>
         </div>
       </template>
       <SiteDailyLineChart
         :dates="dailyData.dates"
         :series="dailyData.series"
         :mode="dailyMode"
+        :selected-site="selectedSite"
+        :focus-sites="focusSites"
+        @select-site="onSelectSite"
       />
     </NCard>
   </div>
@@ -161,12 +228,38 @@ const seedingRoseData = computed(() =>
   grid-column: 1 / -1;
 }
 
+.filter-bar {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 0.625rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.75rem;
+  background: hsl(var(--primary) / 8%);
+  border: 1px solid hsl(var(--primary) / 25%);
+  border-radius: 0.5rem;
+}
+
+.filter-text {
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: center;
+  font-size: 0.8125rem;
+  color: hsl(var(--card-foreground));
+}
+
 .mode-toggle {
   display: flex;
   gap: 0;
   overflow: hidden;
   border: 1px solid hsl(var(--border));
   border-radius: 0.375rem;
+}
+
+.chart-actions {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
 }
 
 .mode-toggle button {

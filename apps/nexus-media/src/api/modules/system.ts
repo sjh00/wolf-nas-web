@@ -28,6 +28,22 @@ export namespace SystemApi {
     text: string;
   }
 
+  export interface LogSearchResult {
+    items: LogItem[];
+    total: number;
+    page: number;
+    page_size: number;
+    truncated?: boolean;
+  }
+
+  export interface LogSearchParams {
+    keyword?: string;
+    level?: string;
+    source?: string;
+    page?: number;
+    page_size?: number;
+  }
+
   export interface MessageClient {
     id: number;
     name: string;
@@ -68,6 +84,18 @@ export async function getSystemStatusApi() {
   return requestClient.post<SystemApi.SystemStatus>('/system/status', {});
 }
 
+/** 获取缓存列表与统计 */
+export async function getCachesApi() {
+  return requestClient.get<
+    Array<{ error?: string; keys?: number; name: string }>
+  >('/system/caches');
+}
+
+/** 清理缓存（name 为空则全部清理） */
+export async function clearCacheApi(name?: string) {
+  return requestClient.post('/system/caches/clear', { name: name || null });
+}
+
 /** 执行调度任务 */
 export async function runSchedulerItemApi(item: string) {
   return requestClient.post('/system/scheduler/run', { item });
@@ -99,16 +127,49 @@ export async function getAllSystemConfigApi() {
   return requestClient.post<Record<string, any>>('/system/config/all', {});
 }
 
+/** 获取刮削配置 */
+export async function getScraperConfigApi() {
+  return requestClient.post<Record<string, any>>('/system/config/scraper', {});
+}
+
+/** 设置刮削配置 */
+export async function setScraperConfigApi(data: Record<string, any>) {
+  return requestClient.post('/system/config/scraper/save', data);
+}
+
 /** 获取系统日志 */
 export async function getSystemLogsApi(
   level?: string,
   source?: string,
-  limit: number = 200,
+  limit: number = 1000,
 ) {
   return requestClient.post<SystemApi.LogItem[]>('/system/logs', {
     level,
     source,
     limit,
+  });
+}
+
+/** 全文搜索系统日志（磁盘文件，支持分页） */
+export async function searchSystemLogsApi(params: SystemApi.LogSearchParams) {
+  return requestClient.post<SystemApi.LogSearchResult>('/system/logs/search', {
+    page: 1,
+    page_size: 1000,
+    ...params,
+  });
+}
+
+/** 获取日志来源列表 */
+export async function getSystemLogSourcesApi() {
+  return requestClient.post<string[]>('/system/logs/sources', {});
+}
+
+/** 导出日志（后端生成全部匹配日志文本） */
+export function exportSystemLogsApi(params: SystemApi.LogSearchParams) {
+  return requestClient.download('/system/logs/export', {
+    method: 'POST',
+    timeout: 300_000,
+    data: params,
   });
 }
 
@@ -130,7 +191,7 @@ export async function getProgressApi(type: string) {
   }
   const promise = requestClient.post<{
     code: number;
-    data?: { text: string; value: number };
+    data?: { enable?: boolean; exists?: boolean; text: string; value: number };
   }>('/system/refresh', { type });
   _progressLocks[type] = { promise, time: now };
   return promise;
@@ -154,6 +215,18 @@ export async function listAgentModelsApi(data: {
 }) {
   return requestClient.post<{ code: number; data?: string[] }>(
     '/system/agent/models',
+    data,
+  );
+}
+
+/** 查询 Agent Embedding 模型列表 */
+export async function listAgentEmbeddingModelsApi(data: {
+  api_key: string;
+  api_url: string;
+  provider_name: string;
+}) {
+  return requestClient.post<{ code: number; data?: string[] }>(
+    '/system/agent/embedding_models',
     data,
   );
 }

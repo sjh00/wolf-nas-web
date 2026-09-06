@@ -68,6 +68,20 @@ function getMediaTypeLabel(type?: string) {
   return (type && map[type]) || type || '';
 }
 
+function isSerial(item: any) {
+  const t = String(item?.type || item?.media_type || '').toLowerCase();
+  return t === 'tv' || t === 'anime' || t === '电视剧' || t === '动漫';
+}
+
+function formatSeasonEpisode(se?: string) {
+  if (!se) return '';
+  const m = String(se).match(/S(\d+)\s*E(\d+)/i);
+  if (m) return `第${Number(m[1])}季 第${Number(m[2])}集`;
+  const sm = String(se).match(/S(\d+)/i);
+  if (sm) return `第${Number(sm[1])}季`;
+  return String(se);
+}
+
 function handlePageChange(page: number) {
   fetchData(page);
 }
@@ -75,10 +89,31 @@ function handlePageChange(page: number) {
 async function copyLink(url: string) {
   if (!url) return;
   try {
-    await navigator.clipboard.writeText(url);
-    message.success('下载链接已复制');
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      message.success('下载链接已复制');
+      return;
+    }
+    throw new Error('clipboard unavailable');
   } catch {
-    message.error('复制失败');
+    // 降级：非安全上下文 / 权限被拒时用 execCommand('copy') 兜底
+    const textarea = document.createElement('textarea');
+    textarea.value = url;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.append(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, url.length);
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      // execCommand 抛错时保持 false
+    }
+    textarea.remove();
+    if (ok) message.success('下载链接已复制');
+    else message.error('复制失败，请手动复制');
   }
 }
 
@@ -159,6 +194,9 @@ onMounted(() => fetchData(1));
                   <span v-if="item.media_type">{{
                     getMediaTypeLabel(item.media_type)
                   }}</span>
+                  <span v-if="isSerial(item) && item.season_episode">{{
+                    formatSeasonEpisode(item.season_episode)
+                  }}</span>
                   <span v-if="item.vote">评分 {{ item.vote }}</span>
                 </div>
                 <div v-if="item.overview" class="history-torrent truncate">
@@ -227,6 +265,9 @@ onMounted(() => fetchData(1));
                 <span v-if="item.year">{{ item.year }}</span>
                 <span v-if="item.media_type">{{
                   getMediaTypeLabel(item.media_type)
+                }}</span>
+                <span v-if="isSerial(item) && item.season_episode">{{
+                  formatSeasonEpisode(item.season_episode)
                 }}</span>
                 <span v-if="item.vote">评分 {{ item.vote }}</span>
                 <span v-if="item.site" class="history-site">{{

@@ -8,10 +8,15 @@ type SelectOption = BasicOption;
 type TabOption = BasicOption;
 
 interface BasicUserInfo {
+  [key: string]: any;
   /**
    * 头像
    */
   avatar: string;
+  /**
+   * 是否仍为初始默认密码（需提示修改）
+   */
+  is_default_password?: boolean;
   /**
    * 用户昵称
    */

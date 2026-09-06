@@ -45,6 +45,7 @@ export interface SubscribeEditItem {
   filter_rule?: string;
   filter_include?: string;
   filter_exclude?: string;
+  filter_free?: boolean;
   download_setting?: string;
   save_path?: string;
   total_ep?: number | string;
@@ -95,6 +96,7 @@ const form = ref({
   filter_rule: '',
   filter_include: '',
   filter_exclude: '',
+  filter_free: false,
   download_setting: '',
   save_path: '',
   total_ep: '',
@@ -107,6 +109,11 @@ const isTv = computed(() => form.value.type === 'tv');
 
 watch([() => props.show, () => props.item], async ([visible, item]) => {
   if (visible && item) {
+    // 先加载站点选项，再用其校验默认站点，避免默认 rss_sites/search_sites 被空选项过滤掉
+    if (!optionsLoaded.value) {
+      await loadOptions();
+      optionsLoaded.value = true;
+    }
     form.value = {
       name: item.name,
       year: item.year || '',
@@ -126,6 +133,7 @@ watch([() => props.show, () => props.item], async ([visible, item]) => {
           : '',
       filter_include: item.filter_include || '',
       filter_exclude: item.filter_exclude || '',
+      filter_free: item.filter_free ?? false,
       download_setting:
         item.download_setting == null ? '' : String(item.download_setting),
       save_path: item.save_path || '',
@@ -142,10 +150,6 @@ watch([() => props.show, () => props.item], async ([visible, item]) => {
           )
         : [],
     };
-    if (!optionsLoaded.value) {
-      await loadOptions();
-      optionsLoaded.value = true;
-    }
     if (item.download_setting != null) {
       await fetchDownloadDirs();
     }
@@ -251,6 +255,7 @@ function handleConfirm() {
     filter_rule: form.value.filter_rule,
     filter_include: form.value.filter_include,
     filter_exclude: form.value.filter_exclude,
+    filter_free: form.value.filter_free,
     download_setting: form.value.download_setting || undefined,
     save_path: form.value.save_path || undefined,
     rss_sites: form.value.rss_sites,
@@ -285,7 +290,7 @@ function handleConfirm() {
     :bordered="false"
   >
     <div v-if="item" class="space-y-3">
-      <NForm label-placement="left" label-width="90" size="small">
+      <NForm label-placement="top" size="small">
         <!-- 基础信息 -->
         <div class="form-section">
           <div class="form-section-header">
@@ -301,7 +306,7 @@ function handleConfirm() {
                 placeholder="留空使用TMDB数据"
               />
             </NFormItem>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <NFormItem label="模糊匹配">
                 <NCheckbox v-model:checked="form.fuzzy_match"> 开启 </NCheckbox>
               </NFormItem>
@@ -311,7 +316,7 @@ function handleConfirm() {
                 </NCheckbox>
               </NFormItem>
             </div>
-            <div v-if="isTv" class="grid grid-cols-3 gap-3">
+            <div v-if="isTv" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <NFormItem label="季">
                 <NSelect v-model:value="form.season" :options="seasonOptions" />
               </NFormItem>
@@ -337,13 +342,14 @@ function handleConfirm() {
             <span class="form-section-title">过滤设置</span>
           </div>
           <div class="form-section-body">
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <NFormItem label="质量">
                 <NSelect
                   v-model:value="form.filter_restype"
                   :options="restypeOptions"
                   multiple
                   clearable
+                  max-tag-count="responsive"
                   placeholder="留空不限制"
                 />
               </NFormItem>
@@ -353,6 +359,7 @@ function handleConfirm() {
                   :options="pixOptions"
                   multiple
                   clearable
+                  max-tag-count="responsive"
                   placeholder="留空不限制"
                 />
               </NFormItem>
@@ -363,7 +370,7 @@ function handleConfirm() {
                 />
               </NFormItem>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <NFormItem label="包含">
                 <NInput
                   v-model:value="form.filter_include"
@@ -383,6 +390,9 @@ function handleConfirm() {
                 :options="filterRules"
               />
             </NFormItem>
+            <NFormItem label="只订阅免费">
+              <NCheckbox v-model:checked="form.filter_free"> 开启 </NCheckbox>
+            </NFormItem>
           </div>
         </div>
 
@@ -395,7 +405,7 @@ function handleConfirm() {
             <span class="form-section-title">下载设置</span>
           </div>
           <div class="form-section-body">
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <NFormItem label="下载设置">
                 <NSelect
                   v-model:value="form.download_setting"

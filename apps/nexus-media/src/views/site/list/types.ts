@@ -15,6 +15,7 @@ export interface SiteForm {
   parse: boolean;
   unread_msg_notify: boolean;
   chrome: boolean;
+  browser_persistent: boolean;
   proxy: boolean;
   subtitle: boolean;
   tag: boolean;
@@ -67,4 +68,15 @@ export interface SiteItem {
 export interface SiteSelectOption {
   label: string;
   value: string;
+}
+
+export interface SiteDefinition {
+  id: string;
+  name: string;
+  domain: string;
+  type: string;
+  public: boolean;
+  domain_aliases: string[];
+  encoding: string;
+  detail_page_url: string;
 }

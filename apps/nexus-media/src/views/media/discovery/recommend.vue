@@ -1,25 +1,12 @@
 <script lang="ts" setup>
-import type { SubscribeConfirmItem } from '#/components/subscribe/SubscribeConfirmModal.vue';
-import type { SubscribeEditItem } from '#/components/subscribe/SubscribeEditModal.vue';
-
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-
-import { IconifyIcon } from '@vben/icons';
 
 import { NSpin } from 'naive-ui';
 
-import { getRecommendApi, webSearchApi } from '#/api';
-import {
-  addSubscriptionApi,
-  addSubscriptionMediaApi,
-  deleteSubscriptionApi,
-  getDefaultSubscriptionSettingApi,
-} from '#/api/modules/subscription';
+import { getRecommendApi } from '#/api';
+import MediaCard from '#/components/media/MediaCard.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
-import SubscribeConfirmModal from '#/components/subscribe/SubscribeConfirmModal.vue';
-import SubscribeEditModal from '#/components/subscribe/SubscribeEditModal.vue';
-import { useAppNotification } from '#/utils/notify';
 
 interface RecommendItem {
   id: string;
@@ -29,44 +16,23 @@ interface RecommendItem {
   year?: string;
   vote?: string;
   overview?: string;
-  weekday?: string;
   fav?: string;
-  date?: string;
-  site?: string;
   media_type?: string;
   tmdbid?: string;
-  doubanid?: string;
   rssid?: string;
+  genres?: string[];
+  countries?: string[];
+  languages?: string[];
 }
 
 const route = useRoute();
 const router = useRouter();
-const notification = useAppNotification();
 
 const items = ref<RecommendItem[]>([]);
 const loading = ref(false);
 const loadingMore = ref(false);
 const currentPage = ref(1);
 const hasMore = ref(true);
-const hoveredId = ref<null | string>(null);
-
-// 订阅确认弹窗
-const subscribeConfirmShow = ref(false);
-const subscribeConfirmItem = ref<null | SubscribeConfirmItem>(null);
-const subscribeConfirmPending = ref(false);
-
-function updateCardSubscribeState(title: string, fav: string, rssid?: string) {
-  for (const item of items.value) {
-    if (item.title === title) {
-      item.fav = fav;
-      if (rssid !== undefined) item.rssid = rssid;
-      return;
-    }
-  }
-}
-
-const subscribeEditShow = ref(false);
-const subscribeEditItem = ref<null | SubscribeEditItem>(null);
 
 const pageTitle = ref(String(route.query.title || '更多推荐'));
 const queryType = ref(String(route.query.type || ''));
@@ -97,193 +63,19 @@ async function loadItems(page: number, append = false) {
   }
 }
 
-function handleCardClick(item: RecommendItem) {
-  const mediaId = item.tmdbid || item.id;
-  if (!mediaId) return;
-  const typeParam = item.type || item.media_type || 'movie';
-  router.push({
-    name: 'MediaDetail',
-    query: {
-      type: typeParam,
-      id: mediaId,
-    },
-  });
-}
-
-async function handleSearch(item: RecommendItem, e: Event) {
-  e.stopPropagation();
-  try {
-    await webSearchApi({
-      search_word: item.title,
-      tmdbid: item.id,
-      media_type: item.media_type || item.type,
-    });
-    router.push(
-      `/media/search?s=${encodeURIComponent(item.title)}&from=discovery`,
-    );
-  } catch (error: any) {
-    notification.error('搜索失败', {
-      description: error?.message || '未知错误',
-    });
-  }
-}
-
-function normalizeMediaType(type?: string): 'movie' | 'tv' {
-  if (!type) return 'movie';
-  const t = String(type).toLowerCase().trim();
-  if (t === 'movie') return 'movie';
-  return 'tv';
-}
-
-function getMediaTypeLabel(type?: string) {
-  const map: Record<string, string> = {
-    movie: '电影',
-    tv: '电视剧',
-  };
-  return map[normalizeMediaType(type)] || '未知';
-}
-
-async function handleSubscribe(item: RecommendItem, e: Event) {
-  e.stopPropagation();
-  if (item.fav === '1' && item.rssid) {
-    try {
-      await deleteSubscriptionApi(Number(item.rssid));
-      updateCardSubscribeState(item.title, '');
-      notification.success('已取消订阅', { description: item.title });
-    } catch (error: any) {
-      notification.error('取消订阅失败', { description: error?.message || '' });
-    }
-    return;
-  }
-  subscribeConfirmItem.value = {
-    id: item.id,
-    tmdbid: item.tmdbid,
+function handleSearchFromCard(item: Record<string, any>) {
+  handleSearch({
+    id: item.tmdbId || item.id,
     title: item.title,
-    year: item.year || '',
-    type: normalizeMediaType(item.media_type || item.type),
-    image: item.image,
-    overview: item.overview,
-  };
-  subscribeConfirmShow.value = true;
+    media_type: item.mediaType || item.type,
+    type: item.type,
+  } as any);
 }
 
-async function handleConfirmSubscribe(seasons: number[], _autoMode: boolean) {
-  const item = subscribeConfirmItem.value;
-  if (!item) return;
-  subscribeConfirmPending.value = true;
-  try {
-    const typeParam = item.type === 'movie' ? 'movie' : 'tv';
-    if (typeParam === 'tv' && seasons.length > 0) {
-      let lastRssid = '';
-      for (const season of seasons) {
-        const r: any = await addSubscriptionMediaApi({
-          name: item.title,
-          year: item.year || '',
-          type: 'tv',
-          mediaid: String(item.id),
-          season: String(season),
-        });
-        lastRssid = r?.rssid ? String(r.rssid) : lastRssid;
-      }
-      notification.success('订阅成功', {
-        description: `${item.title} 已订阅 ${seasons.length} 季`,
-      });
-      updateCardSubscribeState(item.title, '1', lastRssid || undefined);
-    } else {
-      const res: any = await addSubscriptionMediaApi({
-        name: item.title,
-        year: item.year || '',
-        type: typeParam,
-        mediaid: String(item.id),
-      });
-      const success =
-        res?.code === 0 ||
-        res?.success ||
-        res?.rssid ||
-        res?.msg?.includes('成功') ||
-        !res;
-      if (success) {
-        notification.success('订阅成功', {
-          description: res?.msg || `${item.title} 已添加订阅`,
-        });
-        updateCardSubscribeState(
-          item.title,
-          '1',
-          res?.rssid ? String(res.rssid) : undefined,
-        );
-      } else {
-        notification.error('订阅失败', {
-          description: res?.msg || '未知错误',
-        });
-      }
-    }
-  } catch (error: any) {
-    notification.error('订阅失败', {
-      description: error?.message || '未知错误',
-    });
-  } finally {
-    subscribeConfirmPending.value = false;
-  }
-}
-
-async function handleEditSubscribe() {
-  const item = subscribeConfirmItem.value;
-  if (!item) return;
-  const mtype = item.type === 'movie' ? 'movie' : 'tv';
-  let defaults: any = {};
-  try {
-    const res: any = await getDefaultSubscriptionSettingApi(mtype);
-    defaults = res?.data || res || {};
-  } catch {
-    // ignore
-  }
-  subscribeEditItem.value = {
-    name: item.title,
-    year: item.year || '',
-    type: mtype,
-    tmdbid: String(item.tmdbid || item.id || ''),
-    image: item.image,
-    season: '',
-    fuzzy_match: false,
-    over_edition: !!(
-      defaults.over_edition && String(defaults.over_edition) === '1'
-    ),
-    filter_restype: defaults.restype || defaults.filter_restype || '',
-    filter_pix: defaults.pix || defaults.filter_pix || '',
-    filter_team: defaults.team || defaults.filter_team || '',
-    filter_rule: defaults.rule == null ? '' : String(defaults.rule),
-    filter_include: defaults.include || defaults.filter_include || '',
-    filter_exclude: defaults.exclude || defaults.filter_exclude || '',
-    download_setting:
-      defaults.download_setting == null
-        ? ''
-        : String(defaults.download_setting),
-    rss_sites: Array.isArray(defaults.rss_sites) ? defaults.rss_sites : [],
-    search_sites: Array.isArray(defaults.search_sites)
-      ? defaults.search_sites
-      : [],
-  } as SubscribeEditItem;
-  subscribeConfirmShow.value = false;
-  subscribeEditShow.value = true;
-}
-
-async function handleConfirmEdit(data: Record<string, any>) {
-  try {
-    await addSubscriptionApi(data);
-    notification.success('订阅成功', {
-      description: `${data.name} 已添加订阅`,
-    });
-    updateCardSubscribeState(data.name, '1');
-  } catch (error: any) {
-    notification.error('订阅失败', {
-      description: error?.message || '未知错误',
-    });
-  }
-}
-
-function getImgUrl(src?: string) {
-  if (!src) return '/static/img/no-image.png';
-  return src;
+async function handleSearch(item: RecommendItem) {
+  router.push(
+    `/media/search?s=${encodeURIComponent(item.title)}&from=discovery&tmdbid=${encodeURIComponent(item.id || '')}`,
+  );
 }
 
 // Intersection Observer for infinite scroll
@@ -322,6 +114,13 @@ onMounted(() => {
   }
 });
 
+onUnmounted(() => {
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
+});
+
 watch(
   () => route.query,
   () => {
@@ -347,98 +146,25 @@ watch(
         class="grid gap-4 mt-4"
         style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))"
       >
-        <div
+        <MediaCard
           v-for="item in items"
           :key="item.id"
-          class="cursor-pointer relative rounded-lg overflow-hidden shadow-sm hover:shadow-md transition"
-          @click="handleCardClick(item)"
-          @mouseenter="hoveredId = item.id"
-          @mouseleave="hoveredId = null"
-        >
-          <div style="aspect-ratio: 2/3" class="bg-muted">
-            <img
-              :src="getImgUrl(item.image)"
-              class="w-full h-full object-cover"
-              alt=""
-              @error="
-                (e: any) => {
-                  e.target.src = '/static/img/no-image.png';
-                }
-              "
-            />
-          </div>
-          <span
-            v-if="item.media_type || item.type"
-            class="absolute top-1.5 left-1.5 text-white text-[10px] px-1.5 py-0.5 rounded"
-            :class="
-              (item.media_type || item.type) === 'movie'
-                ? 'bg-primary'
-                : 'bg-accent'
-            "
-          >
-            {{ getMediaTypeLabel(item.media_type || item.type) }}
-          </span>
-          <!-- 右上角：评分 + 已入库绿勾 -->
-          <div class="absolute top-1.5 right-1.5 flex items-center gap-1">
-            <span
-              v-if="item.vote && item.vote !== '0.0' && item.vote !== '0'"
-              class="text-white text-[10px] px-1.5 py-0.5 rounded bg-secondary"
-            >
-              {{ item.vote }}
-            </span>
-            <span
-              v-if="item.fav === '2'"
-              class="bg-success rounded-full p-0.5 flex items-center justify-center"
-            >
-              <IconifyIcon
-                icon="lucide:check"
-                class="text-white"
-                style="width: 12px; height: 12px"
-              />
-            </span>
-          </div>
-          <div
-            v-if="hoveredId === item.id"
-            class="absolute inset-0 bg-background/80 flex flex-col justify-between p-2"
-          >
-            <div class="text-foreground">
-              <div v-if="item.year" class="text-xs font-semibold">
-                {{ item.year }}
-              </div>
-              <h4 class="text-sm font-bold mt-0.5 line-clamp-2">
-                {{ item.title }}
-              </h4>
-              <p
-                v-if="item.overview"
-                class="text-xs mt-1 line-clamp-3 opacity-90"
-              >
-                {{ item.overview }}
-              </p>
-            </div>
-            <div class="flex justify-between items-center">
-              <button
-                class="text-foreground hover:text-primary"
-                @click="(e) => handleSearch(item, e)"
-              >
-                <IconifyIcon icon="lucide:search" class="size-[18px]" />
-              </button>
-              <button
-                :class="
-                  item.fav === '1'
-                    ? 'text-destructive'
-                    : 'text-foreground hover:text-destructive/80'
-                "
-                @click="(e) => handleSubscribe(item, e)"
-              >
-                <IconifyIcon
-                  icon="lucide:heart"
-                  class="size-[18px]"
-                  :style="{ fill: item.fav === '1' ? 'currentColor' : 'none' }"
-                />
-              </button>
-            </div>
-          </div>
-        </div>
+          :id="item.id"
+          :tmdb-id="item.tmdbid"
+          :title="item.title"
+          :poster="item.image"
+          :type="item.type"
+          :media-type="item.media_type"
+          :vote="item.vote"
+          :year="item.year"
+          :overview="item.overview"
+          :fav="item.fav"
+          :rssid="item.rssid"
+          :genres="item.genres"
+          :countries="item.countries"
+          :languages="item.languages"
+          @search="handleSearchFromCard"
+        />
       </div>
       <div v-else-if="!loading" class="text-center text-muted-foreground py-12">
         暂无数据
@@ -455,36 +181,5 @@ watch(
         >已加载全部</span
       >
     </div>
-
-    <!-- 订阅确认弹窗 -->
-    <SubscribeConfirmModal
-      v-model:show="subscribeConfirmShow"
-      :item="subscribeConfirmItem"
-      @confirm="handleConfirmSubscribe"
-      @edit="handleEditSubscribe"
-    />
-
-    <!-- 编辑订阅弹窗 -->
-    <SubscribeEditModal
-      v-model:show="subscribeEditShow"
-      :item="subscribeEditItem"
-      @confirm="handleConfirmEdit"
-    />
   </div>
 </template>
-
-<style scoped>
-.line-clamp-2 {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.line-clamp-3 {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-}
-</style>

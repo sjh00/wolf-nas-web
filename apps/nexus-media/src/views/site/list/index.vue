@@ -1,16 +1,22 @@
 <script lang="ts" setup>
-import type { SiteForm, SiteItem, SiteSelectOption } from './types';
+import type {
+  SiteDefinition,
+  SiteForm,
+  SiteItem,
+  SiteSelectOption,
+} from './types';
 
 import { computed, onMounted, ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
-import { NButton, NSelect, NSpace, NSpin } from 'naive-ui';
+import { NButton, NInput, NSelect, NSpace, NSpin } from 'naive-ui';
 
 import { getDownloadSettingsApi } from '#/api/modules/download';
 import { getFilterGroupsApi } from '#/api/modules/filter';
 import {
   deleteSiteApi,
+  getSiteDefinitionsApi,
   getSiteFaviconsApi,
   getSitesApi,
   saveSiteApi,
@@ -23,6 +29,7 @@ import PageHeader from '#/components/page/PageHeader.vue';
 import { useSiteStore } from '#/store';
 import { useAppNotification } from '#/utils/notify';
 
+import SiteBatchTestModal from './components/SiteBatchTestModal.vue';
 import SiteCard from './components/SiteCard.vue';
 import SiteDeleteModal from './components/SiteDeleteModal.vue';
 import SiteEditModal from './components/SiteEditModal.vue';
@@ -34,13 +41,16 @@ const syncLoading = ref(false);
 const testLoading = ref<null | number>(null);
 const activeSource = ref('all');
 const activeType = ref('all');
+const searchKeyword = ref('');
 const editModalShow = ref(false);
 const deleteModalShow = ref(false);
+const batchTestShow = ref(false);
 const deleteTarget = ref<null | SiteItem>(null);
 const editingSite = ref<null | SiteForm>(null);
 
 const favicons = ref<Record<string, string>>({});
 const faviconLoadFailed = ref<Record<string, boolean>>({});
+const definitions = ref<SiteDefinition[]>([]);
 const filterGroups = ref<SiteSelectOption[]>([{ label: '默认', value: '' }]);
 const downloadSettings = ref<SiteSelectOption[]>([
   { label: '默认', value: '' },
@@ -72,6 +82,16 @@ const filteredSites = computed(() => {
       return !(s.site_public ?? s.public);
     });
   }
+  const kw = searchKeyword.value.trim().toLowerCase();
+  if (kw) {
+    list = list.filter((s: any) => {
+      const haystack = [s.name, s.signurl, s.rssurl, s.domain, s.site_url]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(kw);
+    });
+  }
   return list;
 });
 
@@ -83,6 +103,7 @@ const groupedSites = computed(() => {
         source: activeSource.value,
         label: option?.label || activeSource.value,
         icon: option?.icon || 'lucide:search',
+        header: false,
         sites: filteredSites.value,
       },
     ];
@@ -106,6 +127,7 @@ const groupedSites = computed(() => {
         source,
         label: option?.label || source,
         icon: option?.icon || 'lucide:search',
+        header: true,
         sites: groups[source] || [],
       };
     })
@@ -120,6 +142,13 @@ const sourceCounts = computed(() => {
   }
   return counts;
 });
+
+// 仅展示存在站点的来源；无站点的索引器（如 Prowlarr 0）不再出现在筛选里
+const visibleSourceOptions = computed(() =>
+  sourceOptions.filter(
+    (o) => o.key === 'all' || (sourceCounts.value[o.key] || 0) > 0,
+  ),
+);
 
 const editModalRef = ref<InstanceType<typeof SiteEditModal> | null>(null);
 
@@ -190,14 +219,15 @@ function handleAdd() {
     public: false,
     site_public: false,
     rss_enable: true,
-    brush_enable: false,
+    brush_enable: true,
     statistic_enable: true,
-    parse: false,
-    unread_msg_notify: false,
+    parse: true,
+    unread_msg_notify: true,
     chrome: false,
+    browser_persistent: false,
     proxy: false,
     subtitle: false,
-    tag: false,
+    tag: true,
     ua: '',
     headers: '',
     rule: '',
@@ -272,6 +302,24 @@ async function handleTest(item: SiteItem) {
   }
 }
 
+// 批量测试当前筛选出的非公开（PT）站点，排除第三方索引器（jackett/prowlarr）
+const batchTestSites = computed(() =>
+  filteredSites.value.filter(
+    (s: any) =>
+      !(s.site_public ?? s.public) &&
+      (s.source || 'builtin') === 'builtin' &&
+      !s.third_party,
+  ),
+);
+
+function handleBatchTest() {
+  if (batchTestSites.value.length === 0) {
+    notification.warning('当前没有可测试的站点');
+    return;
+  }
+  batchTestShow.value = true;
+}
+
 async function handleSyncThirdParty() {
   if (syncLoading.value) return;
   syncLoading.value = true;
@@ -305,7 +353,22 @@ async function handleSiteConfigUpdate(site: SiteItem, data: Partial<SiteItem>) {
   }
 }
 
-onMounted(fetchSites);
+async function fetchSiteDefinitions() {
+  try {
+    const res: any = await getSiteDefinitionsApi();
+    const list = Array.isArray(res) ? res : res?.data || [];
+    definitions.value = list;
+  } catch (error: any) {
+    notification.error('获取站点定义失败', {
+      description: error?.message || '',
+    });
+  }
+}
+
+onMounted(() => {
+  fetchSites();
+  fetchSiteDefinitions();
+});
 </script>
 
 <template>
@@ -313,21 +376,17 @@ onMounted(fetchSites);
     <PageHeader title="站点维护">
       <template #actions>
         <NSpace align="center">
-          <div class="filter-type">
-            <span class="filter-type-label">类型</span>
-            <NSelect
-              v-model:value="activeType"
-              :options="typeOptions"
-              size="small"
-              :consistent-menu-width="false"
-              style="width: 90px"
-            />
-          </div>
           <NButton :loading="syncLoading" @click="handleSyncThirdParty">
             <template #icon>
               <IconifyIcon icon="lucide:refresh-cw" class="h-4 w-4" />
             </template>
             同步站点
+          </NButton>
+          <NButton @click="handleBatchTest">
+            <template #icon>
+              <IconifyIcon icon="lucide:activity" class="h-4 w-4" />
+            </template>
+            批量测试
           </NButton>
           <NButton type="primary" @click="handleAdd">
             <template #icon>
@@ -345,78 +404,106 @@ onMounted(fetchSites);
       </template>
     </PageHeader>
 
-    <div class="site-layout">
-      <aside class="source-sidebar">
-        <nav class="source-nav" role="tablist">
-          <button
-            v-for="item in sourceOptions"
-            :key="item.key"
-            class="source-nav-item"
-            :class="{ 'source-nav-active': activeSource === item.key }"
-            :aria-selected="activeSource === item.key"
-            role="tab"
-            type="button"
-            @click="activeSource = item.key"
-          >
-            <IconifyIcon :icon="item.icon" class="source-nav-icon" />
-            <span class="source-nav-label">{{ item.label }}</span>
-            <span class="source-nav-count">{{
-              sourceCounts[item.key] || 0
-            }}</span>
-          </button>
-        </nav>
-      </aside>
+    <div class="toolbar-bar">
+      <div class="source-filter-bar" role="tablist" aria-label="来源筛选">
+        <button
+          v-for="item in visibleSourceOptions"
+          :key="item.key"
+          class="source-filter-item"
+          :class="{ 'source-filter-active': activeSource === item.key }"
+          :aria-selected="activeSource === item.key"
+          role="tab"
+          type="button"
+          @click="activeSource = item.key"
+        >
+          <IconifyIcon :icon="item.icon" class="source-filter-icon" />
+          <span>{{ item.label }}</span>
+          <span class="source-filter-count">{{
+            sourceCounts[item.key] || 0
+          }}</span>
+        </button>
+      </div>
 
-      <main class="site-main">
-        <NSpin :show="loading">
-          <div v-if="groupedSites.length > 0" class="site-groups">
-            <section
-              v-for="group in groupedSites"
-              :key="group.source"
-              class="site-group"
-            >
-              <div class="site-group-header">
-                <IconifyIcon :icon="group.icon" class="site-group-icon" />
-                <span class="site-group-title">{{ group.label }}</span>
-                <span class="site-group-count"
-                  >{{ group.sites.length }} 个站点</span
-                >
-              </div>
-              <div class="grid-site-card">
-                <SiteCard
-                  v-for="site in group.sites"
-                  :key="site.id"
-                  :site="site"
-                  :favicon="site.third_party ? '' : getFavicon(site.name)"
-                  :favicon-fallback="
-                    site.third_party ? '' : getFaviconFallback(site.name)
-                  "
-                  :favicon-failed="!!faviconLoadFailed[site.name]"
-                  :testing="testLoading === site.id"
-                  :download-settings="downloadSettings"
-                  @favicon-error="handleFaviconError"
-                  @test="handleTest"
-                  @edit="handleEdit"
-                  @delete="handleDelete"
-                  @update="handleSiteConfigUpdate"
-                />
-              </div>
-            </section>
-          </div>
+      <div class="toolbar-divider"></div>
 
-          <EmptyState
-            v-else
-            title="没有站点"
-            subtitle="当前筛选条件下没有站点"
+      <div class="filter-type">
+        <NSelect
+          v-model:value="activeType"
+          :options="typeOptions"
+          size="small"
+          :consistent-menu-width="false"
+          style="width: 88px"
+        />
+      </div>
+
+      <div class="toolbar-spacer"></div>
+
+      <NInput
+        v-model:value="searchKeyword"
+        placeholder="搜索名称 / 地址"
+        clearable
+        size="small"
+        class="toolbar-search"
+      >
+        <template #prefix>
+          <IconifyIcon
+            icon="lucide:search"
+            class="h-3.5 w-3.5 text-muted-foreground"
           />
-        </NSpin>
-      </main>
+        </template>
+      </NInput>
+    </div>
+
+    <div class="site-main">
+      <NSpin :show="loading">
+        <div v-if="groupedSites.length > 0" class="site-groups">
+          <section
+            v-for="group in groupedSites"
+            :key="group.source"
+            class="site-group"
+          >
+            <div v-if="group.header" class="site-group-header">
+              <IconifyIcon :icon="group.icon" class="site-group-icon" />
+              <span class="site-group-title">{{ group.label }}</span>
+              <span class="site-group-count"
+                >{{ group.sites.length }} 个站点</span
+              >
+            </div>
+            <div class="grid-site-card">
+              <SiteCard
+                v-for="site in group.sites"
+                :key="site.id"
+                :site="site"
+                :favicon="site.third_party ? '' : getFavicon(site.name)"
+                :favicon-fallback="
+                  site.third_party ? '' : getFaviconFallback(site.name)
+                "
+                :favicon-failed="!!faviconLoadFailed[site.name]"
+                :testing="testLoading === site.id"
+                :download-settings="downloadSettings"
+                @favicon-error="handleFaviconError"
+                @test="handleTest"
+                @edit="handleEdit"
+                @delete="handleDelete"
+                @update="handleSiteConfigUpdate"
+              />
+            </div>
+          </section>
+        </div>
+
+        <EmptyState
+          v-else-if="!loading"
+          title="没有站点"
+          subtitle="当前筛选条件下没有站点"
+        />
+      </NSpin>
     </div>
 
     <SiteEditModal
       ref="editModalRef"
       v-model:show="editModalShow"
       :site="editingSite"
+      :definitions="definitions"
       :filter-groups="filterGroups"
       :download-settings="downloadSettings"
       @update:site="editingSite = $event"
@@ -428,109 +515,111 @@ onMounted(fetchSites);
       :target="deleteTarget"
       @confirm="confirmDelete"
     />
+    <SiteBatchTestModal v-model:show="batchTestShow" :sites="batchTestSites" />
   </div>
 </template>
 
 <style scoped>
-.site-layout {
+.toolbar-bar {
   display: flex;
-  gap: 1.5rem;
-  align-items: flex-start;
-}
-
-.source-sidebar {
-  position: sticky;
-  top: 1rem;
-  flex-shrink: 0;
-  width: 180px;
-}
-
-.source-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
-  border-radius: 0.875rem;
+  border-radius: 0.75rem;
 }
 
-.source-nav-item {
-  position: relative;
+.source-filter-bar {
   display: flex;
-  gap: 0.625rem;
+  gap: 0.125rem;
   align-items: center;
-  width: 100%;
-  padding: 0.625rem 0.75rem;
-  font-size: 0.875rem;
+  padding: 0.125rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: hsl(var(--accent) / 45%);
+  border-radius: 0.625rem;
+}
+
+.source-filter-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.source-filter-item {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.375rem;
+  align-items: center;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   transition: all 0.2s ease;
 }
 
-.source-nav-item::before {
-  position: absolute;
-  top: 50%;
-  left: 0.25rem;
-  width: 0.1875rem;
-  height: 1rem;
-  content: '';
-  background: hsl(var(--primary));
-  border-radius: 9999px;
-  opacity: 0;
-  transform: translateY(-50%);
-  transition: opacity 0.2s ease;
-}
-
-.source-nav-item:hover {
+.source-filter-item:hover {
   color: hsl(var(--card-foreground));
-  background: hsl(var(--accent) / 50%);
 }
 
-.source-nav-active {
+.source-filter-active {
   color: hsl(var(--primary));
-  background: hsl(var(--primary) / 8%);
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 8%);
 }
 
-.source-nav-active::before {
-  opacity: 1;
-}
-
-.source-nav-icon {
+.source-filter-icon {
   flex-shrink: 0;
-  width: 1rem;
-  height: 1rem;
+  width: 0.9375rem;
+  height: 0.9375rem;
 }
 
-.source-nav-label {
-  flex: 1;
-  text-align: left;
-}
-
-.source-nav-count {
+.source-filter-count {
   flex-shrink: 0;
-  min-width: 1.25rem;
-  padding: 0.125rem 0.375rem;
+  min-width: 1.125rem;
+  padding: 0.0625rem 0.3125rem;
   font-size: 0.6875rem;
   font-weight: 600;
-  line-height: 1;
+  line-height: 1.25rem;
   color: hsl(var(--muted-foreground));
   text-align: center;
   background: hsl(var(--background));
   border-radius: 9999px;
 }
 
-.source-nav-active .source-nav-count {
+.source-filter-active .source-filter-count {
   color: hsl(var(--primary));
-  background: hsl(var(--background));
+  background: hsl(var(--primary) / 12%);
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 0.125rem;
+  background: hsl(var(--border));
+}
+
+.filter-type {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.toolbar-search {
+  width: 220px;
+  max-width: 100%;
 }
 
 .site-main {
-  flex: 1;
   min-width: 0;
 }
 
@@ -574,46 +663,10 @@ onMounted(fetchSites);
   gap: 0.875rem;
 }
 
-.filter-type {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.filter-type-label {
-  flex-shrink: 0;
-  font-size: 0.8125rem;
-  color: hsl(var(--muted-foreground));
-  white-space: nowrap;
-}
-
-@media (max-width: 768px) {
-  .site-layout {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .source-sidebar {
-    position: static;
-    width: 100%;
-  }
-
-  .source-nav {
-    flex-flow: row wrap;
-  }
-
-  .source-nav-item {
-    flex: 1;
-    min-width: 120px;
-  }
-
-  .filter-type-label {
-    display: none;
-  }
-
-  .grid-site-card {
-    grid-template-columns: 1fr;
+@media (max-width: 640px) {
+  .toolbar-search {
+    flex: 1 1 100%;
+    width: auto;
   }
 }
 </style>

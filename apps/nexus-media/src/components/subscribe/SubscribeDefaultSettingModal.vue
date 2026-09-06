@@ -51,6 +51,7 @@ const form = ref({
   rule: '',
   include: '',
   exclude: '',
+  free: '0',
   download_setting: '',
   rss_sites: [] as string[],
   search_sites: [] as string[],
@@ -126,6 +127,7 @@ async function loadSettings() {
       rule: nullableString(data.rule),
       include: data.include || data.filter_include || '',
       exclude: data.exclude || data.filter_exclude || '',
+      free: data.free && String(data.free) === '1' ? '1' : '0',
       download_setting: nullableString(data.download_setting),
       rss_sites: (Array.isArray(data.rss_sites) ? data.rss_sites : []).filter(
         (s: string) => rssSites.value.some((x) => x.value === s),
@@ -183,6 +185,7 @@ function handleConfirm() {
     rule: form.value.rule,
     include: form.value.include,
     exclude: form.value.exclude,
+    free: form.value.free,
     download_setting: form.value.download_setting,
     rss_sites: form.value.rss_sites,
     search_sites: form.value.search_sites,
@@ -201,7 +204,7 @@ function handleConfirm() {
     :bordered="false"
     @update:show="(v) => emit('update:show', v)"
   >
-    <NForm label-placement="left" label-width="90" size="small">
+    <NForm label-placement="top" size="small">
       <!-- 过滤设置 -->
       <div class="form-section">
         <div class="form-section-header">
@@ -211,13 +214,14 @@ function handleConfirm() {
           <span class="form-section-title">过滤设置</span>
         </div>
         <div class="form-section-body">
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <NFormItem label="质量">
               <NSelect
                 v-model:value="form.restype"
                 :options="restypeOptions"
                 multiple
                 clearable
+                max-tag-count="responsive"
                 placeholder="留空不限制"
               />
             </NFormItem>
@@ -227,6 +231,7 @@ function handleConfirm() {
                 :options="pixOptions"
                 multiple
                 clearable
+                max-tag-count="responsive"
                 placeholder="留空不限制"
               />
             </NFormItem>
@@ -234,7 +239,7 @@ function handleConfirm() {
               <NInput v-model:value="form.team" placeholder="支持正则" />
             </NFormItem>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <NFormItem label="包含">
               <NInput v-model:value="form.include" placeholder="关键字或正则" />
             </NFormItem>
@@ -242,13 +247,24 @@ function handleConfirm() {
               <NInput v-model:value="form.exclude" placeholder="关键字或正则" />
             </NFormItem>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <NFormItem label="过滤规则">
               <NSelect v-model:value="form.rule" :options="filterRules" />
             </NFormItem>
             <NFormItem label="洗版">
               <NSelect
                 v-model:value="form.over_edition"
+                :options="[
+                  { label: '否', value: '0' },
+                  { label: '是', value: '1' },
+                ]"
+              />
+            </NFormItem>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <NFormItem label="只订阅免费">
+              <NSelect
+                v-model:value="form.free"
                 :options="[
                   { label: '否', value: '0' },
                   { label: '是', value: '1' },

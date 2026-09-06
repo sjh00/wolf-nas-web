@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 
 import { IconifyIcon } from '@vben/icons';
 
+import { breakpointsTailwind, useBreakpoints } from '@vueuse/core';
 import {
   NButton,
   NForm,
@@ -28,6 +29,8 @@ import {
   setDefaultDownloaderApi,
   testDownloaderApi,
 } from '#/api';
+import DownloaderPathPickerModal from '#/components/media/DownloaderPathPickerModal.vue';
+import PathPickerModal from '#/components/media/PathPickerModal.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
 
 interface DownloaderItem {
@@ -54,6 +57,18 @@ interface DownloaderTypeConf {
 
 const router = useRouter();
 const message = useMessage();
+const { smaller } = useBreakpoints(breakpointsTailwind);
+const isMobile = smaller('md');
+/** 类型选择：新增态全量展示，编辑态仅展示当前类型 */
+const visibleDownloaderTypes = computed<Record<string, DownloaderTypeConf>>(
+  () => {
+    if (!editingDownloader.value.id) return downloaderTypes.value;
+    const current = editingType.value
+      ? downloaderTypes.value[editingType.value]
+      : undefined;
+    return current ? { [editingType.value]: current } : {};
+  },
+);
 const downloaders = ref<Record<string, any>>({});
 const defaultDownloader = ref('');
 const downloaderTypes = ref<Record<string, DownloaderTypeConf>>({});
@@ -259,6 +274,40 @@ function addDir() {
 
 function removeDir(index: number) {
   editingDirs.value.splice(index, 1);
+}
+
+// 下载器目录选择器（save_path，来自下载器 API）
+const dlPathPicker = ref({
+  show: false,
+  index: -1,
+});
+
+function openDlPathPicker(index: number) {
+  dlPathPicker.value = { show: true, index };
+}
+
+function handleDlPathConfirm(path: string) {
+  const idx = dlPathPicker.value.index;
+  if (idx >= 0 && editingDirs.value[idx]) {
+    editingDirs.value[idx].save_path = path;
+  }
+}
+
+// 本地目录选择器（container_path，WolfNas 访问目录）
+const localPathPicker = ref({
+  show: false,
+  index: -1,
+});
+
+function openLocalPathPicker(index: number) {
+  localPathPicker.value = { show: true, index };
+}
+
+function handleLocalPathConfirm(path: string) {
+  const idx = localPathPicker.value.index;
+  if (idx >= 0 && editingDirs.value[idx]) {
+    editingDirs.value[idx].container_path = path;
+  }
 }
 
 function gotoDownloadSetting() {
@@ -505,8 +554,8 @@ onMounted(fetchData);
       preset="card"
       :style="{ width: '640px', maxWidth: '92vw' }"
     >
-      <NForm label-placement="left" :label-width="100">
-        <NGrid :cols="2" :x-gap="16">
+      <NForm :label-placement="isMobile ? 'top' : 'left'" :label-width="100">
+        <NGrid :cols="isMobile ? 1 : 2" :x-gap="16">
           <NGridItem span="1">
             <NFormItem label="名称" required>
               <NInput
@@ -529,18 +578,31 @@ onMounted(fetchData);
         </NGrid>
 
         <NFormItem label="类型" required>
-          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          <div
+            class="grid w-full gap-3 sm:grid-cols-3 md:grid-cols-4"
+            :style="
+              isMobile
+                ? {
+                    gridTemplateColumns: `repeat(${Math.min(Object.keys(visibleDownloaderTypes).length, 3) || 1}, minmax(0, 1fr))`,
+                  }
+                : undefined
+            "
+          >
             <div
-              v-for="(conf, key) in downloaderTypes"
+              v-for="(conf, key) in visibleDownloaderTypes"
               :key="key"
-              class="flex flex-col items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all"
+              class="flex flex-col items-center gap-2 p-3 rounded-lg border transition-all"
               :style="
                 editingType === key
                   ? 'border-color: hsl(var(--primary)); background: hsl(var(--primary) / 0.08); box-shadow: 0 0 0 2px hsl(var(--primary) / 0.2)'
                   : 'border-color: hsl(var(--border)); background: hsl(var(--card))'
               "
-              :class="editingType === key ? '' : 'hover:border-primary/50'"
-              @click="editingType = key"
+              :class="
+                editingType === key
+                  ? ''
+                  : 'hover:border-primary/50 cursor-pointer'
+              "
+              @click="!editingDownloader.id && (editingType = key)"
             >
               <img
                 v-if="downloaderIcon(key)"
@@ -652,7 +714,7 @@ onMounted(fetchData);
               </div>
             </NTooltip>
           </div>
-          <NGrid :cols="2" :x-gap="16">
+          <NGrid :cols="isMobile ? 1 : 2" :x-gap="16">
             <NGridItem span="1">
               <NFormItem>
                 <template #label>
@@ -700,8 +762,7 @@ onMounted(fetchData);
                       />
                     </template>
                     <div class="max-w-xs text-xs">
-                      启用后只有含Nexus
-                      Media标签的下载任务才会被自动转移和显示，关闭则下载软件中所有的任务都会转移和显示
+                      启用后只有含WolfNas标签的下载任务才会被自动转移和显示，关闭则下载软件中所有的任务都会转移和显示
                     </div>
                   </NTooltip>
                 </template>
@@ -806,14 +867,40 @@ onMounted(fetchData);
                   v-model:value="dir.save_path"
                   class="flex-1"
                   size="small"
-                  placeholder="下载保存目录"
-                />
+                  placeholder="下载保存目录（可手动输入或浏览选择）"
+                >
+                  <template #suffix>
+                    <NButton
+                      size="tiny"
+                      text
+                      title="从下载器浏览选择目录"
+                      @click="openDlPathPicker(idx)"
+                    >
+                      <template #icon>
+                        <IconifyIcon icon="lucide:folder-open" class="size-4" />
+                      </template>
+                    </NButton>
+                  </template>
+                </NInput>
                 <NInput
                   v-model:value="dir.container_path"
                   class="flex-1"
                   size="small"
-                  placeholder="WolfNas访问目录"
-                />
+                  placeholder="WolfNas访问目录（可手动输入或浏览选择）"
+                >
+                  <template #suffix>
+                    <NButton
+                      size="tiny"
+                      text
+                      title="浏览选择目录"
+                      @click="openLocalPathPicker(idx)"
+                    >
+                      <template #icon>
+                        <IconifyIcon icon="lucide:folder-open" class="size-4" />
+                      </template>
+                    </NButton>
+                  </template>
+                </NInput>
               </div>
             </div>
             <NButton size="small" text @click="addDir">
@@ -854,5 +941,31 @@ onMounted(fetchData);
     >
       确定要删除下载器 <strong>{{ deleteTarget?.name }}</strong> 吗？
     </NModal>
+
+    <!-- 下载器目录选择器 -->
+    <DownloaderPathPickerModal
+      v-model:show="dlPathPicker.show"
+      title="选择下载保存目录"
+      :downloader-type="editingType"
+      :downloader-config="editingConfig"
+      :initial-path="
+        dlPathPicker.index >= 0
+          ? editingDirs[dlPathPicker.index]?.save_path
+          : ''
+      "
+      @confirm="handleDlPathConfirm"
+    />
+
+    <!-- 本地目录选择器（WolfNas 访问目录） -->
+    <PathPickerModal
+      v-model:show="localPathPicker.show"
+      title="选择访问目录"
+      :initial-path="
+        localPathPicker.index >= 0
+          ? editingDirs[localPathPicker.index]?.container_path
+          : ''
+      "
+      @confirm="handleLocalPathConfirm"
+    />
   </div>
 </template>

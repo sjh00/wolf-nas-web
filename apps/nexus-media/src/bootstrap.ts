@@ -4,7 +4,7 @@ import { createApp, watchEffect } from 'vue';
 import { registerAccessDirective } from '@vben/access';
 import { registerLoadingDirective } from '@vben/common-ui';
 import { preferences } from '@vben/preferences';
-import { initStores } from '@vben/stores';
+import { initStores, useAccessStore } from '@vben/stores';
 import '@vben/styles';
 import '@vben/styles/naive';
 
@@ -51,6 +51,16 @@ async function bootstrap(namespace: string) {
 
   // 配置 pinia-tore
   await initStores(app, { namespace });
+
+  // 应用加载后（含刷新页面）非阻塞同步浏览器指纹（节流：指纹未变则跳过）
+  // 仅在已登录时上报：未登录提交必然 401，会误触发 refresh token / 强制登出竞态
+  if (useAccessStore().accessToken) {
+    import('#/api/modules/browser_fingerprint')
+      .then(({ BrowserFingerprintApi }) =>
+        BrowserFingerprintApi.submitIfChanged(),
+      )
+      .catch(() => {});
+  }
 
   // 安装权限指令
   registerAccessDirective(app);

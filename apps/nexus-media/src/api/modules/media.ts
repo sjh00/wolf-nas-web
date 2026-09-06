@@ -38,6 +38,7 @@ export namespace MediaApi {
     page?: number;
     source?: string;
     tmdbid?: number;
+    params?: Record<string, any>;
   }
 }
 
@@ -80,9 +81,13 @@ export async function getLibraryHistoryApi() {
 }
 
 /** 获取最新入库 */
-export async function getLibraryDownloadedApi(page?: number) {
+export async function getLibraryDownloadedApi(
+  page?: number,
+  pageSize?: number,
+) {
   return requestClient.post('/media/library/downloaded', {
     page: page || 1,
+    page_size: pageSize || 30,
   });
 }
 
@@ -164,11 +169,65 @@ export async function removeFromLibraryApi(id: number) {
 }
 
 /** 获取搜索结果 */
-export async function getSearchResultApi() {
-  return requestClient.post<{ code: number; data?: Record<string, any> }>(
-    '/media/search/results',
-    {},
+export async function getSearchResultApi(sessionId?: string) {
+  return requestClient.post<{
+    result: Record<string, any>;
+    total: number;
+  }>('/media/search/results', sessionId ? { session_id: sessionId } : {});
+}
+
+/** 订阅搜索进度 SSE */
+export async function subscribeSearchProgressApi(
+  sessionId: string,
+  callbacks: {
+    onEnd?: () => void;
+    onProgress?: (
+      pct: number,
+      text: string,
+      sites?: SiteSearchStatus[],
+    ) => void;
+  },
+  signal?: AbortSignal,
+) {
+  return requestClient.requestSSE(
+    `/system/search/progress/${sessionId}`,
+    undefined,
+    {
+      method: 'GET',
+      signal,
+      onMessage: (content: string) => {
+        const blocks = content.split('\n\n');
+        for (const block of blocks) {
+          const trimmed = block.trim();
+          if (!trimmed) continue;
+          const lines = trimmed.split('\n');
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            try {
+              const parsed = JSON.parse(raw);
+              callbacks.onProgress?.(
+                parsed.value ?? 0,
+                parsed.text ?? '',
+                parsed.sites ?? undefined,
+              );
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+      },
+      onEnd: callbacks.onEnd,
+    },
   );
+}
+
+export interface SiteSearchStatus {
+  name: string;
+  status: 'error' | 'ok' | 'timeout';
+  count: number;
+  error?: string;
 }
 
 /** WEB搜索（从发现页触发） */
@@ -179,7 +238,9 @@ export async function webSearchApi(params: {
   tmdbid?: string;
   unident?: boolean;
 }) {
-  return requestClient.post('/system/search', params, { timeout: 300_000 });
+  return requestClient.post<{ session_id: string }>('/system/search', params, {
+    timeout: 300_000,
+  });
 }
 
 /** 获取电视剧季列表 */
@@ -216,9 +277,14 @@ export interface TransferHistoryItem {
   DEST: string;
   DEST_PATH: string;
   DEST_FILENAME: string;
+  DST_BACKEND?: string;
+  image?: string;
   DATE: string;
   SYNC_MODE?: string;
   RMT_MODE?: string;
+  SEEDS_SEASON?: number;
+  SEEDS_EPISODE?: number;
+  SEEDS_END_EPISODE?: number;
 }
 
 export interface TransferHistoryPageResult {
@@ -258,6 +324,57 @@ export interface DirListItem {
   path: string;
   is_dir: boolean;
   ext?: string;
+  size?: number;
+  mtime?: number;
+  ctime?: number;
+}
+
+/** 创建目录 */
+export async function mkdirApi(data: {
+  backend_id?: string;
+  name: string;
+  path: string;
+}) {
+  return requestClient.post<{ path: string }>('/media/dir/mkdir', data);
+}
+
+/** 批量移动文件 */
+export async function moveFilesApi(data: {
+  backend_id?: string;
+  dest_dir: string;
+  files: string[];
+}) {
+  return requestClient.post('/media/files/move', data);
+}
+
+/** 批量复制文件 */
+export async function copyFilesApi(data: {
+  backend_id?: string;
+  dest_dir: string;
+  files: string[];
+}) {
+  return requestClient.post('/media/files/copy', data);
+}
+
+/** 下载文件（返回 Blob） */
+export async function downloadFileApi(path: string, backendId?: string) {
+  const query = new URLSearchParams();
+  query.set('path', path);
+  query.set('backend_id', backendId || 'local');
+  return requestClient.download(`/media/file/download?${query.toString()}`);
+}
+
+/** 上传文件到指定目录 */
+export async function uploadFileApi(
+  path: string,
+  backendId: string,
+  file: File,
+) {
+  return requestClient.upload('/media/file/upload', {
+    file,
+    path,
+    backend_id: backendId,
+  });
 }
 
 /** 获取转移历史（分页） */
@@ -334,10 +451,10 @@ export async function downloadSubtitleApi(path: string, name: string) {
 }
 
 /** 名称识别测试 */
-export async function nameTestApi(name: string) {
+export async function nameTestApi(name: string, subtitle?: string) {
   return requestClient.post<Record<string, any>>(
     '/media/name_test',
-    { name },
+    { name, subtitle },
     { timeout: 60_000 },
   );
 }
@@ -518,4 +635,52 @@ export async function updateMediaLibraryPathApi(
     new_path,
     backend,
   });
+}
+
+// ---------- 重命名格式：字段目录 / 校验 / 预览 ----------
+
+export interface NameFormatField {
+  key: string;
+  label: string;
+  desc: string;
+  applies: 'both' | 'movie' | 'tv';
+  requires_ms: boolean;
+}
+
+export interface NameFormatGroup {
+  group: string;
+  fields: NameFormatField[];
+}
+
+export interface NameFormatValidateResult {
+  ok: boolean;
+  problems: string[];
+}
+
+/** 获取重命名格式字段目录（供构建器插入按钮使用） */
+export async function getNameFormatFieldsApi() {
+  return requestClient.get<{
+    fields: NameFormatField[];
+    groups: NameFormatGroup[];
+  }>('/media/name_format/fields');
+}
+
+/** 校验重命名格式串 */
+export async function validateNameFormatApi(format: string) {
+  return requestClient.post<NameFormatValidateResult>(
+    '/media/name_format/validate',
+    { format },
+  );
+}
+
+/** 实时预览重命名格式渲染结果 */
+export async function previewNameFormatApi(data: {
+  format: string;
+  media_type: string;
+  values: Record<string, string>;
+}) {
+  return requestClient.post<{
+    segments: Record<string, string>;
+    validate: NameFormatValidateResult;
+  }>('/media/name_format/preview', data);
 }

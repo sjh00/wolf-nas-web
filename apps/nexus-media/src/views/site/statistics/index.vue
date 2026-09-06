@@ -1,9 +1,10 @@
 <script lang="ts" setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
-import { NButton, NCard, NSelect, NSpace, NSpin } from 'naive-ui';
+import { toPng } from 'html-to-image';
+import { NButton, NCard, NPopover, NSelect, NSpace, NSpin } from 'naive-ui';
 
 import {
   getSiteDailyHistoryApi,
@@ -35,20 +36,20 @@ const dailyData = ref<{
 }>({ dates: [], series: [] });
 const dailyMode = ref<'download' | 'upload'>('upload');
 const favicons = ref<Record<string, string>>({});
-const sortBy = ref('');
 const refreshing = ref(false);
+const capturing = ref(false);
+const siteFilterList = ref<string[]>([]);
+const showAllForCapture = ref(false);
+const pageRef = ref<HTMLElement | null>(null);
 
 const siteDetailModalShow = ref(false);
 const siteDetailName = ref('');
 
-const sortOptions = [
-  { label: '默认排序', value: '' },
-  { label: '按上传量', value: 'upload' },
-  { label: '按下载量', value: 'download' },
-  { label: '按做种数', value: 'seeding_count' },
-  { label: '按分享率', value: 'ratio' },
-  { label: '按魔力值', value: 'bonus' },
-];
+const siteFilterOptions = computed(() =>
+  statistics.value
+    .map((i) => ({ label: i.site_name, value: i.site_name }))
+    .toSorted((a, b) => a.label.localeCompare(b.label, 'zh')),
+);
 
 const summaryCards = computed(() => {
   if (!summary.value) return [];
@@ -122,8 +123,7 @@ const summary = computed(() => {
     (sum, i) => sum + (i.message_count || 0),
     0,
   );
-  const avgRatio =
-    items.reduce((sum, i) => sum + parseNumber(i.ratio), 0) / items.length;
+  const avgRatio = totalDownload > 0 ? totalUpload / totalDownload : 0;
   const activeSites = items.filter(
     (i) => parseSize(i.upload) > 0 || parseSize(i.download) > 0,
   ).length;
@@ -141,28 +141,11 @@ const summary = computed(() => {
 });
 
 const sortedStatistics = computed(() => {
-  const items = [...statistics.value];
-  if (!sortBy.value) return items;
-  return items.toSorted((a, b) => {
-    const field = sortBy.value;
-    let av: number;
-    let bv: number;
-    if (
-      field === 'upload' ||
-      field === 'download' ||
-      field === 'seeding_size'
-    ) {
-      av = parseSize((a as any)[field]);
-      bv = parseSize((b as any)[field]);
-    } else if (field === 'ratio' || field === 'bonus') {
-      av = parseNumber((a as any)[field]);
-      bv = parseNumber((b as any)[field]);
-    } else {
-      av = (a as any)[field] || 0;
-      bv = (b as any)[field] || 0;
-    }
-    return bv - av;
-  });
+  let items = [...statistics.value];
+  if (siteFilterList.value.length > 0) {
+    items = items.filter((i) => siteFilterList.value.includes(i.site_name));
+  }
+  return items;
 });
 
 async function handleRefresh() {
@@ -232,9 +215,35 @@ function onResize() {
   screenWidth.value = window.innerWidth;
 }
 
-watch(sortBy, () => {
-  fetchData();
-});
+async function handleScreenshot() {
+  if (!pageRef.value) return;
+  capturing.value = true;
+  // 截图期间临时展开表格全部行（不受分页限制），完成后恢复
+  showAllForCapture.value = true;
+  await nextTick();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  try {
+    // html-to-image 按节点完整高度原生渲染（foreignObject），
+    // 全页截图且 Naive UI 组件（NTag 等）不失真
+    const dataUrl = await toPng(pageRef.value, {
+      pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+      backgroundColor: '#ffffff',
+      cacheBust: true,
+    });
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `站点数据统计-${new Date().toISOString().slice(0, 10)}.png`;
+    link.click();
+    notification.success('截图已保存');
+  } catch (error: any) {
+    notification.error('截图失败', {
+      description: error?.message || '',
+    });
+  } finally {
+    showAllForCapture.value = false;
+    capturing.value = false;
+  }
+}
 
 onMounted(() => {
   fetchData();
@@ -247,16 +256,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="p-4 overflow-x-hidden">
+  <div ref="pageRef" class="p-4 overflow-x-hidden">
     <PageHeader title="站点数据统计">
       <template #actions>
         <NSpace>
-          <NSelect
-            v-model:value="sortBy"
-            :options="sortOptions"
-            style="width: 140px"
-            size="small"
-          />
+          <NButton size="small" :loading="capturing" @click="handleScreenshot">
+            <template #icon>
+              <IconifyIcon icon="lucide:camera" class="h-4 w-4" />
+            </template>
+            截图
+          </NButton>
           <NButton size="small" :loading="refreshing" @click="handleRefresh">
             <template #icon>
               <IconifyIcon icon="lucide:refresh-cw" class="h-4 w-4" />
@@ -304,10 +313,32 @@ onBeforeUnmount(() => {
             <span>站点详细数据</span>
           </div>
         </template>
+        <template #header-extra>
+          <NPopover placement="bottom-end" trigger="click">
+            <template #trigger>
+              <NButton size="tiny" quaternary circle type="primary">
+                <template #icon>
+                  <IconifyIcon icon="lucide:filter" class="h-4 w-4" />
+                </template>
+              </NButton>
+            </template>
+            <NSelect
+              v-model:value="siteFilterList"
+              :options="siteFilterOptions"
+              multiple
+              clearable
+              filterable
+              placeholder="筛选站点（可多选）"
+              size="small"
+              style="width: 13rem"
+            />
+          </NPopover>
+        </template>
         <StatTable
           :data="sortedStatistics"
           :favicons="favicons"
           :is-mobile="isMobile"
+          :show-all="showAllForCapture"
           @refresh="handleRefreshSite"
           @detail="handleOpenSiteDetail"
         />
