@@ -663,8 +663,7 @@ export async function consistencyCheckApi(pageSize?: number, maxPages?: number) 
 }
 
 /** 文件关系分析（源/媒体库存在性 + 硬链接指向） */
-export interface MediaRelationItem {
-  id: number;
+export interface MediaRelationItem {  id: number;
   tmdb_id: number;
   title: string;
   year: string;
@@ -704,6 +703,37 @@ export async function getMediaRelationsApi(params: {
     state_counts: Record<string, number>;
     items: MediaRelationItem[];
   }>(`/media/library/relations?${query.toString()}`);
+}
+
+/** 作品级跨盘迁移预览（列出源/媒体库目录组） */
+export async function migrateMediaPlanApi(tmdbId: number) {
+  const query = new URLSearchParams({ tmdb_id: String(tmdbId) });
+  return requestClient.get<{
+    tmdb_id: number;
+    title: string;
+    year: string;
+    record_count: number;
+    source_dirs: string[];
+    dest_dirs: string[];
+  }>(`/media/migrate/plan?${query.toString()}`);
+}
+
+/** 作品级跨盘归档迁移执行 */
+export async function migrateMediaApi(params: {
+  tmdb_id: number;
+  target_source: string;
+  target_dest: string;
+  cross_drive?: boolean | null;
+  move_torrents?: boolean;
+}) {
+  return requestClient.post<{
+    tmdb_id: number;
+    cross_drive: boolean;
+    migrated_dirs: Array<{ kind: string; old: string; new: string }>;
+    failed: Array<{ kind: string; path: string; error: string }>;
+    updated_records: number;
+    updated_downloads: number;
+  }>('/media/migrate', params);
 }
 
 /** 获取媒体库路径配置 */

@@ -36,6 +36,7 @@ import {
   SYNC_MODES,
 } from '#/api/modules/sync';
 import EmptyState from '#/components/empty/EmptyState.vue';
+import MediaMigrateModal from '#/components/media/MediaMigrateModal.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
 import { useMediaStore } from '#/store';
 import { getImgUrl } from '#/utils/image';
@@ -59,6 +60,10 @@ const deletePayload = ref<null | {
   logids: number[];
 }>(null);
 const selectedIds = ref<number[]>([]);
+
+// 作品级跨盘迁移
+const migrateModalShow = ref(false);
+const migrateTmdbId = ref<undefined | number>(undefined);
 
 // manual identify modal
 const manualModalShow = ref(false);
@@ -190,6 +195,11 @@ function getItemOptions(_item: any) {
       key: 'manual',
       icon: () => h(IconifyIcon, { icon: 'lucide:pencil', class: 'size-4' }),
     },
+    {
+      label: '迁移到其他盘',
+      key: 'migrate',
+      icon: () => h(IconifyIcon, { icon: 'lucide:hard-drive', class: 'size-4' }),
+    },
     { type: 'divider', key: 'd1' },
     {
       label: '删除记录',
@@ -250,6 +260,13 @@ function handleItemAction(key: string, item: any) {
     doReIdentify([item.ID]);
   } else if (key === 'manual') {
     openManualModal(item);
+  } else if (key === 'migrate') {
+    if (!item.TMDBID) {
+      notification.warning('该记录缺少作品ID，无法迁移整体作品');
+      return;
+    }
+    migrateTmdbId.value = item.TMDBID;
+    migrateModalShow.value = true;
   } else if (key.startsWith('del_')) {
     const labels: Record<string, string> = {
       del_log: '删除记录',
@@ -1004,6 +1021,13 @@ onMounted(() => {
         </NSpin>
       </NSpace>
     </NModal>
+
+    <!-- 作品级跨盘迁移 -->
+    <MediaMigrateModal
+      v-model:show="migrateModalShow"
+      :tmdb-id="migrateTmdbId"
+      @success="fetchData"
+    />
   </div>
 </template>
 
