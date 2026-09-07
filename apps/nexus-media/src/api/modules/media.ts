@@ -626,15 +626,21 @@ export async function getLibraryDuplicatesApi(limit?: number) {
 }
 
 /** 按文件锚点清理硬链接链（媒体库+做种+记录+下载器任务） */
-export async function cleanupFileChainApi(filePath: string) {
+export async function cleanupFileChainApi(
+  filePath: string,
+  options?: { sourcePolicy?: 'remove' | 'keep'; deleteDownloader?: boolean },
+) {
   return requestClient.post<{
     anchor: string;
     chain_files: string[];
     deleted_files: string[];
     deleted_transfer_logs: number;
     deleted_torrents: Array<{ downloader: string; ids: string[] }>;
+    source_policy?: string;
   }>('/media/cleanup', {
     file_path: filePath,
+    source_policy: options?.sourcePolicy || 'remove',
+    delete_downloader: options?.deleteDownloader ?? true,
   });
 }
 
@@ -654,6 +660,50 @@ export async function consistencyCheckApi(pageSize?: number, maxPages?: number) 
     page_size: pageSize || 500,
     max_pages: maxPages || 100,
   });
+}
+
+/** 文件关系分析（源/媒体库存在性 + 硬链接指向） */
+export interface MediaRelationItem {
+  id: number;
+  tmdb_id: number;
+  title: string;
+  year: string;
+  season_episode: string;
+  state: 'only_source' | 'only_dest' | 'both' | 'none' | 'unknown';
+  source: {
+    path: string;
+    filename: string;
+    full_path: string;
+    exists: boolean;
+    hardlinks?: string[];
+  };
+  dest: {
+    path: string;
+    filename: string;
+    full_path: string;
+    exists: boolean;
+    hardlinks?: string[];
+  };
+}
+
+export async function getMediaRelationsApi(params: {
+  search?: string;
+  state?: string;
+  page?: number;
+  page_size?: number;
+  with_hardlinks?: boolean;
+}) {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.state) query.set('state', params.state);
+  if (params.page) query.set('page', String(params.page));
+  if (params.page_size) query.set('page_size', String(params.page_size));
+  if (params.with_hardlinks) query.set('with_hardlinks', 'true');
+  return requestClient.get<{
+    total: number;
+    state_counts: Record<string, number>;
+    items: MediaRelationItem[];
+  }>(`/media/library/relations?${query.toString()}`);
 }
 
 /** 获取媒体库路径配置 */
