@@ -22,6 +22,7 @@ import {
   NSelect,
   NSpin,
   NTag,
+  NTooltip,
 } from 'naive-ui';
 
 import {
@@ -29,6 +30,7 @@ import {
   getLibraryDuplicatesApi,
   getMediaRelationsApi,
   getOrphanSourcesApi,
+  refreshFileIndexApi,
   searchFilesApi,
 } from '#/api/modules/media';
 import type { MediaRelationItem, OrphanSourceItem } from '#/api/modules/media';
@@ -80,6 +82,7 @@ const globalSearchResults = ref<FileItem[]>([]);
 const globalSearchLoading = ref(false);
 const globalSearchIndexed = ref(0);
 const globalSearchReady = ref(false);
+const indexRefreshing = ref(false);
 const highlightPath = ref('');
 
 const sortedItems = computed(() => {
@@ -155,6 +158,20 @@ async function handleSearchEnter() {
     notification.error('搜索失败', { description: error?.message || '' });
   } finally {
     globalSearchLoading.value = false;
+  }
+}
+
+async function handleRefreshIndex() {
+  indexRefreshing.value = true;
+  try {
+    await refreshFileIndexApi();
+    notification.info('索引构建已触发', {
+      description: '正在后台扫描媒体库与同步源目录，稍后重新搜索即可看到结果。',
+    });
+  } catch (error: any) {
+    notification.error('构建索引失败', { description: error?.message || '' });
+  } finally {
+    indexRefreshing.value = false;
   }
 }
 
@@ -610,6 +627,23 @@ onMounted(() => nav.init());
             </template>
             文件关系
           </NButton>
+          <NTooltip trigger="hover">
+            <template #trigger>
+              <NButton
+                size="small"
+                quaternary
+                :loading="indexRefreshing"
+                @click="handleRefreshIndex"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:database" class="size-4" />
+                </template>
+                构建索引
+              </NButton>
+            </template>
+            为“全盘搜索”建立文件索引。默认不自动扫描（避免频繁唤醒休眠盘），
+            手动点击后后台扫描媒体库与同步源目录，稍后全盘搜索即可命中新文件。
+          </NTooltip>
         </div>
 
         <div class="search-status" v-if="duplicateMode">
@@ -693,7 +727,19 @@ onMounted(() => nav.init());
           <span>
             全盘搜索「{{ searchKeyword }}」：{{ globalSearchResults.length }}
             个结果
+            <template v-if="!globalSearchReady">
+              · 索引未就绪（已索引 {{ globalSearchIndexed }} 项）
+            </template>
           </span>
+          <NButton
+            v-if="!globalSearchReady"
+            size="tiny"
+            quaternary
+            :loading="indexRefreshing"
+            @click="handleRefreshIndex"
+          >
+            构建索引
+          </NButton>
           <NButton size="tiny" quaternary @click="clearGlobalSearch">
             返回浏览
           </NButton>
