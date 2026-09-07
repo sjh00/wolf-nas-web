@@ -18,6 +18,8 @@ import {
   NFormItem,
   NInput,
   NModal,
+  NPagination,
+  NSelect,
   NSpin,
   NTag,
 } from 'naive-ui';
@@ -25,8 +27,10 @@ import {
 import {
   consistencyCheckApi,
   getLibraryDuplicatesApi,
+  getMediaRelationsApi,
   searchFilesApi,
 } from '#/api/modules/media';
+import type { MediaRelationItem } from '#/api/modules/media';
 import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import TransferModal from '#/components/media/TransferModal.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
@@ -215,6 +219,105 @@ async function handleConsistencyCheck() {
   } finally {
     consistencyLoading.value = false;
   }
+}
+
+// ---- 文件关系分析（源/媒体库存在性 + 硬链接指向） ----
+const relationModalVisible = ref(false);
+const relationLoading = ref(false);
+const relations = ref<MediaRelationItem[]>([]);
+const relationTotal = ref(0);
+const relationStateCounts = ref<Record<string, number>>({});
+const relationState = ref('');
+const relationSearch = ref('');
+const relationPage = ref(1);
+const relationPageSize = ref(20);
+const relationExpanded = ref<null | number>(null);
+
+const relationStateOptions = [
+  { label: '全部', value: '' },
+  { label: '只有源（无媒体库）', value: 'only_source' },
+  { label: '只有媒体库（无源）', value: 'only_dest' },
+  { label: '源+媒体库都有', value: 'both' },
+  { label: '都缺失', value: 'none' },
+  { label: '无法判定', value: 'unknown' },
+];
+
+function relationStateLabel(state: string): string {
+  switch (state) {
+    case 'only_source':
+      return '只有源';
+    case 'only_dest':
+      return '只有媒体库';
+    case 'both':
+      return '源+媒体库';
+    case 'none':
+      return '都缺失';
+    case 'unknown':
+      return '未知';
+    default:
+      return state;
+  }
+}
+
+function relationTagType(state: string): 'success' | 'warning' | 'error' | 'info' | 'default' {
+  switch (state) {
+    case 'both':
+      return 'success';
+    case 'only_source':
+    case 'only_dest':
+      return 'warning';
+    case 'none':
+      return 'error';
+    default:
+      return 'default';
+  }
+}
+
+async function openRelationModal() {
+  relationModalVisible.value = true;
+  relationPage.value = 1;
+  await loadRelations();
+}
+
+async function loadRelations() {
+  relationLoading.value = true;
+  try {
+    const res = await getMediaRelationsApi({
+      search: relationSearch.value || undefined,
+      state: relationState.value || undefined,
+      page: relationPage.value,
+      page_size: relationPageSize.value,
+      with_hardlinks: true,
+    });
+    relations.value = res?.items || [];
+    relationTotal.value = res?.total || 0;
+    relationStateCounts.value = res?.state_counts || {};
+  } catch (error: any) {
+    notification.error('文件关系分析加载失败', {
+      description: error?.message || '',
+    });
+  } finally {
+    relationLoading.value = false;
+  }
+}
+
+function onRelationStateChange() {
+  relationPage.value = 1;
+  void loadRelations();
+}
+
+function onRelationSearch() {
+  relationPage.value = 1;
+  void loadRelations();
+}
+
+function toggleRelation(id: number) {
+  relationExpanded.value = relationExpanded.value === id ? null : id;
+}
+
+function onRelationPageChange(page: number) {
+  relationPage.value = page;
+  void loadRelations();
 }
 
 async function enterDuplicateMode() {
@@ -457,6 +560,12 @@ onMounted(() => nav.init());
               <IconifyIcon icon="lucide:shield-check" class="size-4" />
             </template>
             校验一致性
+          </NButton>
+          <NButton size="small" quaternary @click="openRelationModal">
+            <template #icon>
+              <IconifyIcon icon="lucide:link" class="size-4" />
+            </template>
+            文件关系
           </NButton>
         </div>
 
@@ -883,6 +992,108 @@ onMounted(() => nav.init());
         </ul>
       </template>
     </NModal>
+
+    <!-- 文件关系分析（源/媒体库存在性 + 硬链接指向） -->
+    <NModal
+      v-model:show="relationModalVisible"
+      title="文件关系分析"
+      preset="card"
+      class="relation-modal"
+      :style="{ width: '860px', maxWidth: '95vw' }"
+    >
+      <div class="relation-toolbar">
+        <NSelect
+          v-model:value="relationState"
+          :options="relationStateOptions"
+          size="small"
+          clearable
+          class="relation-filter"
+          @update:value="onRelationStateChange"
+        />
+        <NInput
+          v-model:value="relationSearch"
+          size="small"
+          clearable
+          placeholder="搜索标题/文件名..."
+          @keyup.enter="onRelationSearch"
+          @clear="onRelationSearch"
+        />
+        <span class="relation-total">
+          共 {{ relationTotal }} 条
+          <span v-if="relationStateCounts.only_source">
+            · 只有源 {{ relationStateCounts.only_source }}
+          </span>
+          <span v-if="relationStateCounts.only_dest">
+            · 只有媒体库 {{ relationStateCounts.only_dest }}
+          </span>
+        </span>
+      </div>
+
+      <NSpin :show="relationLoading">
+        <div v-if="!relationLoading && relations.length === 0" class="relation-empty">
+          未找到相关记录
+        </div>
+        <div v-for="rel in relations" :key="rel.id" class="relation-card">
+          <div class="relation-head" @click="toggleRelation(rel.id)">
+            <NTag :type="relationTagType(rel.state)" size="small">
+              {{ relationStateLabel(rel.state) }}
+            </NTag>
+            <span class="relation-title">{{ rel.title }} ({{ rel.year }})</span>
+            <span v-if="rel.season_episode" class="relation-season">
+              {{ rel.season_episode }}
+            </span>
+            <span class="relation-arrow">
+              {{ relationExpanded === rel.id ? '▲' : '▼' }}
+            </span>
+          </div>
+          <div v-if="relationExpanded === rel.id" class="relation-detail">
+            <div class="relation-file">
+              <span class="relation-side">源文件</span>
+              <span :class="rel.source.exists ? 'ok' : 'miss'">
+                {{ rel.source.exists ? '✓ 存在' : '✗ 缺失' }}
+              </span>
+              <span class="relation-path">{{ rel.source.full_path || '—' }}</span>
+              <div v-if="rel.source.hardlinks?.length" class="relation-links">
+                硬链接 ➜
+                <span
+                  v-for="(link, i) in rel.source.hardlinks"
+                  :key="i"
+                  class="relation-link"
+                >
+                  {{ link }}
+                </span>
+              </div>
+            </div>
+            <div class="relation-file">
+              <span class="relation-side">媒体库</span>
+              <span :class="rel.dest.exists ? 'ok' : 'miss'">
+                {{ rel.dest.exists ? '✓ 存在' : '✗ 缺失' }}
+              </span>
+              <span class="relation-path">{{ rel.dest.full_path || '—' }}</span>
+              <div v-if="rel.dest.hardlinks?.length" class="relation-links">
+                硬链接 ➜
+                <span
+                  v-for="(link, i) in rel.dest.hardlinks"
+                  :key="i"
+                  class="relation-link"
+                >
+                  {{ link }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="relationTotal > relationPageSize" class="relation-pagination">
+          <NPagination
+            v-model:page="relationPage"
+            :page-size="relationPageSize"
+            :item-count="relationTotal"
+            @update:page="onRelationPageChange"
+          />
+        </div>
+      </NSpin>
+    </NModal>
   </div>
 </template>
 
@@ -1130,5 +1341,131 @@ onMounted(() => nav.init());
 
 .dup-season {
   color: hsl(var(--muted-foreground));
+}
+
+.relation-modal {
+  .n-card {
+    max-height: 80vh;
+  }
+}
+
+.relation-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+
+  .relation-filter {
+    width: 180px;
+    flex-shrink: 0;
+  }
+
+  .n-input {
+    width: 220px;
+  }
+
+  .relation-total {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: hsl(var(--muted-foreground));
+  }
+}
+
+.relation-empty {
+  padding: 2rem;
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+}
+
+.relation-card {
+  margin-bottom: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+}
+
+.relation-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.375rem 0.5rem;
+  cursor: pointer;
+
+  &:hover {
+    background-color: hsl(var(--accent));
+  }
+}
+
+.relation-title {
+  font-weight: 500;
+  color: hsl(var(--card-foreground));
+}
+
+.relation-season {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.relation-arrow {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.relation-detail {
+  padding: 0.375rem 0.75rem 0.5rem;
+  background-color: hsl(var(--muted) / 30%);
+}
+
+.relation-file {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.125rem 0;
+  font-size: 0.8125rem;
+  flex-wrap: wrap;
+}
+
+.relation-side {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  width: 3.5rem;
+}
+
+.relation-file .ok {
+  color: hsl(var(--success) / 80%);
+}
+
+.relation-file .miss {
+  color: hsl(var(--error) / 80%);
+}
+
+.relation-path {
+  color: hsl(var(--card-foreground));
+  word-break: break-all;
+}
+
+.relation-links {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  width: 100%;
+  margin-top: 2px;
+  color: hsl(var(--muted-foreground));
+}
+
+.relation-link {
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+  color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 10%);
+  border-radius: 0.25rem;
+  word-break: break-all;
+}
+
+.relation-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
 }
 </style>
