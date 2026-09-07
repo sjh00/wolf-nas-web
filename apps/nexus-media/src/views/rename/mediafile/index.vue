@@ -28,9 +28,10 @@ import {
   consistencyCheckApi,
   getLibraryDuplicatesApi,
   getMediaRelationsApi,
+  getOrphanSourcesApi,
   searchFilesApi,
 } from '#/api/modules/media';
-import type { MediaRelationItem } from '#/api/modules/media';
+import type { MediaRelationItem, OrphanSourceItem } from '#/api/modules/media';
 import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import MediaMigrateModal from '#/components/media/MediaMigrateModal.vue';
 import TransferModal from '#/components/media/TransferModal.vue';
@@ -242,6 +243,38 @@ function openMigrateFor(id: number) {
   migrateTmdbId.value = id;
   migrateModalShow.value = true;
 }
+
+// ---- 孤儿源文件（有源文件但下载器无做种任务） ----
+const relationTab = ref<'relation' | 'orphan'>('relation');
+const orphanLoading = ref(false);
+const orphanItems = ref<OrphanSourceItem[]>([]);
+const orphanTotal = ref(0);
+
+async function loadOrphans() {
+  orphanLoading.value = true;
+  try {
+    const res = await getOrphanSourcesApi();
+    orphanItems.value = res?.orphans || [];
+    orphanTotal.value = res?.total || 0;
+  } catch (error: any) {
+    notification.error('孤儿源文件加载失败', {
+      description: error?.message || '',
+    });
+  } finally {
+    orphanLoading.value = false;
+  }
+}
+
+async function switchRelationTab(tab: 'relation' | 'orphan') {
+  relationTab.value = tab;
+  if (tab === 'orphan') {
+    await loadOrphans();
+  } else if (relationModalVisible.value) {
+    // 回到关系列表时刷新
+    void loadRelations();
+  }
+}
+
 
 const relationStateOptions = [
   { label: '全部', value: '' },
@@ -1011,36 +1044,55 @@ onMounted(() => nav.init());
       class="relation-modal"
       :style="{ width: '860px', maxWidth: '95vw' }"
     >
-      <div class="relation-toolbar">
-        <NSelect
-          v-model:value="relationState"
-          :options="relationStateOptions"
+      <div class="relation-tabs mb-2">
+        <NButton
           size="small"
-          clearable
-          class="relation-filter"
-          @update:value="onRelationStateChange"
-        />
-        <NInput
-          v-model:value="relationSearch"
+          :type="relationTab === 'relation' ? 'primary' : 'default'"
+          @click="switchRelationTab('relation')"
+        >
+          关系分析
+        </NButton>
+        <NButton
           size="small"
-          clearable
-          placeholder="搜索标题/文件名..."
-          @keyup.enter="onRelationSearch"
-          @clear="onRelationSearch"
-        />
-        <span class="relation-total">
-          共 {{ relationTotal }} 条
-          <span v-if="relationStateCounts.only_source">
-            · 只有源 {{ relationStateCounts.only_source }}
-          </span>
-          <span v-if="relationStateCounts.only_dest">
-            · 只有媒体库 {{ relationStateCounts.only_dest }}
-          </span>
-        </span>
+          :type="relationTab === 'orphan' ? 'primary' : 'default'"
+          @click="switchRelationTab('orphan')"
+        >
+          孤儿源文件 ({{ orphanTotal }})
+        </NButton>
       </div>
 
-      <NSpin :show="relationLoading">
-        <div v-if="!relationLoading && relations.length === 0" class="relation-empty">
+      <!-- 关系分析视图 -->
+      <div v-if="relationTab === 'relation'">
+        <div class="relation-toolbar">
+          <NSelect
+            v-model:value="relationState"
+            :options="relationStateOptions"
+            size="small"
+            clearable
+            class="relation-filter"
+            @update:value="onRelationStateChange"
+          />
+          <NInput
+            v-model:value="relationSearch"
+            size="small"
+            clearable
+            placeholder="搜索标题/文件名..."
+            @keyup.enter="onRelationSearch"
+            @clear="onRelationSearch"
+          />
+          <span class="relation-total">
+            共 {{ relationTotal }} 条
+            <span v-if="relationStateCounts.only_source">
+              · 只有源 {{ relationStateCounts.only_source }}
+            </span>
+            <span v-if="relationStateCounts.only_dest">
+              · 只有媒体库 {{ relationStateCounts.only_dest }}
+            </span>
+          </span>
+        </div>
+
+        <NSpin :show="relationLoading">
+          <div v-if="!relationLoading && relations.length === 0" class="relation-empty">
           未找到相关记录
         </div>
         <div v-for="rel in relations" :key="rel.id" class="relation-card">
@@ -1105,15 +1157,52 @@ onMounted(() => nav.init());
           </div>
         </div>
 
-        <div v-if="relationTotal > relationPageSize" class="relation-pagination">
-          <NPagination
-            v-model:page="relationPage"
-            :page-size="relationPageSize"
-            :item-count="relationTotal"
-            @update:page="onRelationPageChange"
-          />
-        </div>
-      </NSpin>
+          <div v-if="relationTotal > relationPageSize" class="relation-pagination">
+            <NPagination
+              v-model:page="relationPage"
+              :page-size="relationPageSize"
+              :item-count="relationTotal"
+              @update:page="onRelationPageChange"
+            />
+          </div>
+        </NSpin>
+      </div>
+
+      <!-- 孤儿源文件视图 -->
+      <div v-else>
+        <NSpin :show="orphanLoading">
+          <div v-if="!orphanLoading && orphanItems.length === 0" class="relation-empty">
+            无孤儿源文件（源文件均有对应下载做种任务）
+          </div>
+          <div v-for="item in orphanItems" :key="item.id" class="relation-card">
+            <div class="relation-head" @click="openMigrateFor(item.tmdb_id)">
+              <NTag type="error" size="small">孤儿源</NTag>
+              <span class="relation-title">{{ item.title }} ({{ item.year }})</span>
+              <span v-if="item.season_episode" class="relation-season">
+                {{ item.season_episode }}
+              </span>
+              <NButton
+                size="tiny"
+                quaternary
+                class="ml-auto"
+                @click.stop="openMigrateFor(item.tmdb_id)"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:hard-drive" class="size-3.5" />
+                </template>
+                处理
+              </NButton>
+            </div>
+            <div class="relation-detail">
+              <div class="relation-file">
+                <span class="relation-side">源文件</span>
+                <span class="miss">✗ 无下载任务</span>
+                <span class="relation-path">{{ item.source_full }}</span>
+              </div>
+            </div>
+          </div>
+        </NSpin>
+      </div>
     </NModal>
 
     <!-- 作品级跨盘迁移 -->
@@ -1375,6 +1464,11 @@ onMounted(() => nav.init());
   .n-card {
     max-height: 80vh;
   }
+}
+
+.relation-tabs {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .relation-toolbar {
