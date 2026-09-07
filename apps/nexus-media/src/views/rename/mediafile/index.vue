@@ -22,7 +22,11 @@ import {
   NTag,
 } from 'naive-ui';
 
-import { getLibraryDuplicatesApi, searchFilesApi } from '#/api/modules/media';
+import {
+  consistencyCheckApi,
+  getLibraryDuplicatesApi,
+  searchFilesApi,
+} from '#/api/modules/media';
 import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import TransferModal from '#/components/media/TransferModal.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
@@ -177,6 +181,41 @@ const duplicates = ref<
 >([]);
 const duplicateLoading = ref(false);
 const expandedDuplicate = ref<null | number>(null);
+
+const consistencyLoading = ref(false);
+const consistencyResult = ref<null | {
+  checked: number;
+  fixed: number;
+  missing: number;
+  missing_records: Array<{
+    id: number;
+    dest_path: string;
+    dest_filename: string;
+    expected: string;
+  }>;
+}>(null);
+const consistencyModalVisible = ref(false);
+
+async function handleConsistencyCheck() {
+  consistencyLoading.value = true;
+  try {
+    const res = await consistencyCheckApi(500, 100);
+    const data = res as any;
+    consistencyResult.value = data;
+    const summary = `检查 ${data.checked ?? 0} 条，已修正 ${data.fixed ?? 0} 条，丢失 ${data.missing ?? 0} 条`;
+    if ((data.missing ?? 0) > 0 || (data.fixed ?? 0) > 0) {
+      consistencyModalVisible.value = true;
+    } else {
+      notification.info('媒体库一致性校验', { description: summary });
+    }
+  } catch (error: any) {
+    notification.error('一致性校验失败', {
+      description: error?.message || '',
+    });
+  } finally {
+    consistencyLoading.value = false;
+  }
+}
 
 async function enterDuplicateMode() {
   duplicateMode.value = true;
@@ -407,6 +446,17 @@ onMounted(() => nav.init());
               <IconifyIcon icon="lucide:copy" class="size-4" />
             </template>
             多版本作品
+          </NButton>
+          <NButton
+            size="small"
+            quaternary
+            :loading="consistencyLoading"
+            @click="handleConsistencyCheck"
+          >
+            <template #icon>
+              <IconifyIcon icon="lucide:shield-check" class="size-4" />
+            </template>
+            校验一致性
           </NButton>
         </div>
 
@@ -805,6 +855,34 @@ onMounted(() => nav.init());
       :loading="actions.identifyLoading.value"
       :result="actions.identifyResult.value"
     />
+
+    <!-- 媒体库一致性校验结果 -->
+    <NModal
+      v-model:show="consistencyModalVisible"
+      title="媒体库一致性校验结果"
+      preset="dialog"
+      type="info"
+      positive-text="知道了"
+    >
+      <p>
+        共检查 <strong>{{ consistencyResult?.checked ?? 0 }}</strong> 条转移记录，
+        已修正 <strong>{{ consistencyResult?.fixed ?? 0 }}</strong> 条，
+        丢失 <strong>{{ consistencyResult?.missing ?? 0 }}</strong> 条。
+      </p>
+      <template v-if="(consistencyResult?.missing_records?.length || 0) > 0">
+        <p class="mt-2 text-sm text-muted-foreground">
+          以下记录的目标文件在磁盘上未找到，且无法定位移动后的新位置：
+        </p>
+        <ul class="mt-1 max-h-60 list-disc overflow-auto pl-5 text-sm">
+          <li
+            v-for="item in consistencyResult!.missing_records"
+            :key="item.id"
+          >
+            {{ item.expected }}
+          </li>
+        </ul>
+      </template>
+    </NModal>
   </div>
 </template>
 

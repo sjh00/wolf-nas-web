@@ -36,10 +36,12 @@ import {
 } from '#/api';
 import EmptyState from '#/components/empty/EmptyState.vue';
 import { useDownloadEventStream } from '#/composables/useDownloadEventStream';
+import { useMultiVersionDownload } from '#/composables/useMultiVersionDownload';
 import { useDownloadStore } from '#/store';
 
 const downloadStore = useDownloadStore();
 const message = useMessage();
+const multiVersionDownload = useMultiVersionDownload();
 const loading = ref(false);
 const refreshTimer = ref<null | number>(null);
 const deleteConfirmShow = ref(false);
@@ -402,15 +404,24 @@ async function handleAddDownload() {
         ? fileList.value.map((f) => f.file?.name).filter(Boolean)
         : [];
 
-    await addTorrentApi({
-      urls,
-      files: files as string[],
-      dl_dir: selectedDir.value || undefined,
-      dl_setting: selectedSetting.value || undefined,
-    });
-    message.success('添加下载成功');
-    addModalShow.value = false;
-    await fetchTasks(1);
+    const done = await multiVersionDownload.submit(
+      (strategy?: string) =>
+        addTorrentApi({
+          confirm_strategy: strategy,
+          urls,
+          files: files as string[],
+          dl_dir: selectedDir.value || undefined,
+          dl_setting: selectedSetting.value || undefined,
+        }),
+      {
+        successMessage: () => {
+          message.success('添加下载成功');
+          addModalShow.value = false;
+          void fetchTasks(1);
+        },
+      },
+    );
+    if (!done) return;
   } catch (error: any) {
     message.error(error?.message || '添加下载失败');
   } finally {

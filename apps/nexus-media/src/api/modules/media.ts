@@ -638,6 +638,24 @@ export async function cleanupFileChainApi(filePath: string) {
   });
 }
 
+/** 媒体库一致性校验（跨盘整理感知）：修正/标注转移记录DEST与磁盘不一致 */
+export async function consistencyCheckApi(pageSize?: number, maxPages?: number) {
+  return requestClient.post<{
+    checked: number;
+    fixed: number;
+    missing: number;
+    missing_records: Array<{
+      id: number;
+      dest_path: string;
+      dest_filename: string;
+      expected: string;
+    }>;
+  }>('/media/consistency/check', {
+    page_size: pageSize || 500,
+    max_pages: maxPages || 100,
+  });
+}
+
 /** 获取媒体库路径配置 */
 export async function getMediaLibraryConfigApi() {
   return requestClient.post<{
