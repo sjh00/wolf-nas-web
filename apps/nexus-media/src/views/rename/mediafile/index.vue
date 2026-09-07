@@ -27,6 +27,7 @@ import {
 
 import {
   consistencyCheckApi,
+  getFileIndexStatusApi,
   getLibraryDuplicatesApi,
   getMediaRelationsApi,
   getOrphanSourcesApi,
@@ -83,7 +84,43 @@ const globalSearchLoading = ref(false);
 const globalSearchIndexed = ref(0);
 const globalSearchReady = ref(false);
 const indexRefreshing = ref(false);
+const indexInfo = ref<null | { ready: boolean; indexed: number; build_time: number }>(null);
 const highlightPath = ref('');
+
+const INDEX_STALE_DAYS = 7;
+
+const indexBuildText = computed(() => {
+  const t = indexInfo.value?.build_time || 0;
+  if (!t) return '未构建';
+  return new Date(t * 1000).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+});
+
+const indexStale = computed(() => {
+  const t = indexInfo.value?.build_time || 0;
+  if (!t) return false;
+  return Date.now() - t * 1000 > INDEX_STALE_DAYS * 24 * 60 * 60;
+});
+
+const indexTooltipText = computed(() => {
+  const t = indexInfo.value?.build_time || 0;
+  const count = indexInfo.value?.indexed ?? 0;
+  let text = '为“全盘搜索”建立文件索引。默认不自动扫描（避免频繁唤醒休眠盘），手动点击后后台扫描媒体库与同步源目录。';
+  if (t) {
+    text += ` 最近构建：${indexBuildText.value}，已索引 ${count} 项。`;
+    if (indexStale.value) {
+      text += ` 已超过 ${INDEX_STALE_DAYS} 天，建议重新构建。`;
+    }
+  } else {
+    text += ' 尚未构建索引。';
+  }
+  return text;
+});
 
 const sortedItems = computed(() => {
   const list = [...nav.dirList.value];
@@ -161,13 +198,32 @@ async function handleSearchEnter() {
   }
 }
 
+async function loadIndexStatus() {
+  try {
+    const res = await getFileIndexStatusApi();
+    indexInfo.value = res as any;
+    globalSearchReady.value = res?.ready || false;
+    globalSearchIndexed.value = res?.indexed || 0;
+  } catch {
+    // 忽略：状态加载失败不影响主功能
+  }
+}
+
 async function handleRefreshIndex() {
   indexRefreshing.value = true;
   try {
     await refreshFileIndexApi();
     notification.info('索引构建已触发', {
-      description: '正在后台扫描媒体库与同步源目录，稍后重新搜索即可看到结果。',
+      description: '正在后台扫描媒体库与同步源目录，构建完成后显示更新时间与文件数。',
     });
+    // 轮询状态直到构建时间更新（最长 ~120 秒）
+    const before = indexInfo.value?.build_time || 0;
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      await loadIndexStatus();
+      if (indexInfo.value && indexInfo.value.build_time > before) break;
+      if (indexInfo.value && indexInfo.value.ready && before === 0) break;
+    }
   } catch (error: any) {
     notification.error('构建索引失败', { description: error?.message || '' });
   } finally {
@@ -542,7 +598,10 @@ function handleMoveCopyConfirm(dest: string, destBackendId: string) {
 // ---- 移动端抽屉 ----
 const navDrawerShow = ref(false);
 
-onMounted(() => nav.init());
+onMounted(() => {
+  nav.init();
+  void loadIndexStatus();
+});
 </script>
 
 <template>
@@ -639,10 +698,20 @@ onMounted(() => nav.init());
                   <IconifyIcon icon="lucide:database" class="size-4" />
                 </template>
                 构建索引
+                <span
+                  v-if="indexInfo?.ready"
+                  class="index-state"
+                  :class="{ 'index-stale': indexStale }"
+                >
+                  · {{ indexBuildText }}
+                  <template v-if="indexStale">
+                    <span class="index-warn">(超7天)</span>
+                  </template>
+                </span>
+                <span v-else class="index-state">· 未构建</span>
               </NButton>
             </template>
-            为“全盘搜索”建立文件索引。默认不自动扫描（避免频繁唤醒休眠盘），
-            手动点击后后台扫描媒体库与同步源目录，稍后全盘搜索即可命中新文件。
+            {{ indexTooltipText }}
           </NTooltip>
         </div>
 
@@ -1515,6 +1584,20 @@ onMounted(() => nav.init());
 .relation-tabs {
   display: flex;
   gap: 0.5rem;
+}
+
+.index-state {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.index-state.index-stale {
+  color: hsl(var(--warning) / 80%);
+}
+
+.index-state .index-warn {
+  font-weight: 600;
+  color: hsl(var(--warning));
 }
 
 .relation-toolbar {
