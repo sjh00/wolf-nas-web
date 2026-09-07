@@ -725,6 +725,7 @@ export async function migrateMediaApi(params: {
   target_dest: string;
   cross_drive?: boolean | null;
   move_torrents?: boolean;
+  orphan_policy?: 'migrate' | 'remove' | 'skip';
 }) {
   return requestClient.post<{
     tmdb_id: number;
@@ -733,7 +734,34 @@ export async function migrateMediaApi(params: {
     failed: Array<{ kind: string; path: string; error: string }>;
     updated_records: number;
     updated_downloads: number;
+    orphan_policy: string;
+    orphan_files: string[];
+    orphan_removed: string[];
   }>('/media/migrate', params);
+}
+
+/** 孤儿源文件（有源文件但下载器无做种任务） */
+export interface OrphanSourceItem {
+  id: number;
+  tmdb_id: number;
+  title: string;
+  year: string;
+  season_episode: string;
+  source_path: string;
+  source_filename: string;
+  source_full: string;
+  dest_path: string;
+  dest_filename: string;
+}
+
+export async function getOrphanSourcesApi(tmdbId?: number) {
+  const query = new URLSearchParams();
+  if (tmdbId) query.set('tmdb_id', String(tmdbId));
+  return requestClient.get<{
+    total: number;
+    orphans: OrphanSourceItem[];
+    source_dirs: string[];
+  }>(`/media/migrate/orphans?${query.toString()}`);
 }
 
 /** 获取媒体库路径配置 */

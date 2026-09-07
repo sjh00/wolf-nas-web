@@ -13,7 +13,7 @@ import {
   NSpin,
 } from 'naive-ui';
 
-import { migrateMediaApi, migrateMediaPlanApi } from '#/api/modules/media';
+import { migrateMediaApi, migrateMediaPlanApi, getOrphanSourcesApi } from '#/api/modules/media';
 import { getSyncTasksApi, type SyncApi } from '#/api/modules/sync';
 import { useAppNotification } from '#/utils/notify';
 
@@ -40,6 +40,10 @@ const selectedDest = ref('');
 const crossDrive = ref(false);
 const moveTorrents = ref(true);
 
+// 孤儿源文件（有源文件但下载器无做种任务）批量处理策略
+const orphanCount = ref(0);
+const orphanPolicy = ref<'migrate' | 'remove' | 'skip'>('migrate');
+
 // 迁移预览
 const plan = ref<null | {
   title: string;
@@ -57,11 +61,13 @@ async function loadPlan() {
   if (!props.tmdbId) return;
   loading.value = true;
   try {
-    const [planRes, syncRes] = await Promise.all([
+    const [planRes, syncRes, orphanRes] = await Promise.all([
       migrateMediaPlanApi(props.tmdbId),
       getSyncTasksApi(),
+      getOrphanSourcesApi(props.tmdbId),
     ]);
     plan.value = planRes as any;
+    orphanCount.value = orphanRes?.total || 0;
     // 组装目标盘候选（source -> dest 成对）；过滤掉与当前源目录相同的盘
     const dict = (syncRes as unknown as Record<string, SyncApi.SyncTask>) || {};
     const seen = new Set<string>();
@@ -106,6 +112,7 @@ async function confirmMigrate() {
       target_dest: selectedDest.value,
       cross_drive: crossDrive.value,
       move_torrents: moveTorrents.value,
+      orphan_policy: orphanPolicy.value,
     });
     const failedCount = (res as any)?.failed?.length || 0;
     notification.success(
@@ -113,7 +120,9 @@ async function confirmMigrate() {
         ? `迁移完成（${failedCount} 项失败）`
         : '迁移完成',
       {
-        description: `迁移目录 ${(res as any)?.migrated_dirs?.length || 0} 个`,
+        description: `迁移目录 ${(res as any)?.migrated_dirs?.length || 0} 个，孤儿源 ${
+          (res as any)?.orphan_removed?.length || 0
+        } 个`,
       },
     );
     emit('success');
@@ -190,6 +199,26 @@ watch(
         <NAlert type="info" :show-icon="true" class="mb-3">
           同盘将直接移动（保留硬链接）；跨盘将先复制、校验后再删除旧位置，确保不丢失文件。
         </NAlert>
+
+        <NAlert
+          v-if="orphanCount > 0"
+          type="warning"
+          :show-icon="true"
+          class="mb-3"
+        >
+          检测到 <strong>{{ orphanCount }}</strong> 个孤儿源文件（有源文件但下载器中无做种任务，通常是删除记录时残留的）。请选择处理方式：
+        </NAlert>
+
+        <NFormItem v-if="orphanCount > 0" label="孤儿源文件处理">
+          <NSelect
+            v-model:value="orphanPolicy"
+            :options="[
+              { label: '同步迁移（保留文件，随目录移动）', value: 'migrate' },
+              { label: '清除（物理删除，释放空间）', value: 'remove' },
+              { label: '跳过（留原盘不动）', value: 'skip' },
+            ]"
+          />
+        </NFormItem>
 
         <div class="flex items-center gap-6">
           <div class="flex items-center gap-2">
