@@ -584,6 +584,47 @@ export async function searchFilesApi(keyword: string, limit?: number) {
   }>(`/media/search/files?${query.toString()}`);
 }
 
+/** 版本文件项 */
+export interface FileVersionItem {
+  source_filename: string;
+  dest_path: string;
+  dest_filename: string;
+  full_path: string;
+  season_episode: string;
+  date: string;
+  exists: boolean;
+  spec: string;
+  hardlinks: string[];
+}
+
+/** 查询某作品的全部版本文件（多版本识别） */
+export async function searchVersionsApi(tmdbId: number) {
+  const query = new URLSearchParams();
+  query.set('tmdb_id', String(tmdbId));
+  return requestClient.get<{
+    items: FileVersionItem[];
+    total: number;
+    tmdb_id: number;
+  }>(`/media/search/versions?${query.toString()}`);
+}
+
+/** 列出全部存在多版本/重复文件的作品 */
+export async function getLibraryDuplicatesApi(limit?: number) {
+  const query = new URLSearchParams();
+  if (limit) query.set('limit', String(limit));
+  return requestClient.get<{
+    items: Array<{
+      tmdb_id: number;
+      title: string;
+      year: string;
+      dir_count: number;
+      file_count: number;
+      versions: FileVersionItem[];
+    }>;
+    total: number;
+  }>(`/media/library/duplicates?${query.toString()}`);
+}
+
 /** 获取媒体库路径配置 */
 export async function getMediaLibraryConfigApi() {
   return requestClient.post<{
