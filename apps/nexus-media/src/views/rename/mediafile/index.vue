@@ -32,6 +32,7 @@ import {
 } from '#/api/modules/media';
 import type { MediaRelationItem } from '#/api/modules/media';
 import IdentifyResult from '#/components/media/IdentifyResult.vue';
+import MediaMigrateModal from '#/components/media/MediaMigrateModal.vue';
 import TransferModal from '#/components/media/TransferModal.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
 import { useAppNotification } from '#/utils/notify';
@@ -232,6 +233,15 @@ const relationSearch = ref('');
 const relationPage = ref(1);
 const relationPageSize = ref(20);
 const relationExpanded = ref<null | number>(null);
+
+// 作品级跨盘迁移
+const migrateModalShow = ref(false);
+const migrateTmdbId = ref<undefined | number>(undefined);
+
+function openMigrateFor(id: number) {
+  migrateTmdbId.value = id;
+  migrateModalShow.value = true;
+}
 
 const relationStateOptions = [
   { label: '全部', value: '' },
@@ -1042,6 +1052,17 @@ onMounted(() => nav.init());
             <span v-if="rel.season_episode" class="relation-season">
               {{ rel.season_episode }}
             </span>
+            <NButton
+              size="tiny"
+              quaternary
+              class="ml-auto"
+              @click.stop="openMigrateFor(rel.tmdb_id)"
+            >
+              <template #icon>
+                <IconifyIcon icon="lucide:hard-drive" class="size-3.5" />
+              </template>
+              迁移
+            </NButton>
             <span class="relation-arrow">
               {{ relationExpanded === rel.id ? '▲' : '▼' }}
             </span>
@@ -1094,6 +1115,13 @@ onMounted(() => nav.init());
         </div>
       </NSpin>
     </NModal>
+
+    <!-- 作品级跨盘迁移 -->
+    <MediaMigrateModal
+      v-model:show="migrateModalShow"
+      :tmdb-id="migrateTmdbId"
+      @success="loadRelations"
+    />
   </div>
 </template>
 
