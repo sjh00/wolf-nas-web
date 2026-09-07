@@ -15,6 +15,24 @@ export namespace DownloadApi {
     downloader?: string;
   }
 
+  /** 下载前多版本检测响应 */
+  export interface MultiVersionConfirm {
+    need_confirm: boolean;
+    message: string;
+    versions: Array<{
+      source_filename?: string;
+      dest_path?: string;
+      dest_filename?: string;
+      full_path?: string;
+      season_episode?: string;
+      date?: string;
+      spec?: string;
+      exists?: boolean;
+      hardlinks?: string[];
+    }>;
+    tmdb_id?: number;
+  }
+
   export interface DownloaderConfig {
     id?: string;
     name: string;
@@ -252,10 +270,11 @@ export async function downloadSearchResultApi(
   id: string,
   dir?: string,
   setting?: string,
+  confirmStrategy?: string,
 ) {
-  return requestClient.post(
+  return requestClient.post<DownloadApi.MultiVersionConfirm>(
     '/download/tasks/add',
-    { id, dir, setting },
+    { id, dir, setting, confirm_strategy: confirmStrategy },
     { timeout: 60_000 },
   );
 }
@@ -317,6 +336,7 @@ export async function resolveDownloadUrlApi(params: {
 
 /** 添加种子下载任务 */
 export async function addTorrentApi(params: {
+  confirm_strategy?: string;
   description?: string;
   dl_dir?: string;
   dl_setting?: string;
@@ -329,9 +349,13 @@ export async function addTorrentApi(params: {
   upload_volume_factor?: number;
   urls?: string[];
 }) {
-  return requestClient.post('/download/tasks/add_torrent', params, {
-    timeout: 60_000,
-  });
+  return requestClient.post<DownloadApi.MultiVersionConfirm>(
+    '/download/tasks/add_torrent',
+    params,
+    {
+      timeout: 60_000,
+    },
+  );
 }
 
 /** 获取删种任务列表 */

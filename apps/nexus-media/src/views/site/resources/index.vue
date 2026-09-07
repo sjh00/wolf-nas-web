@@ -19,6 +19,7 @@ import { getSiteFaviconsApi, getSiteResourcesApi } from '#/api/modules/site';
 import EmptyState from '#/components/empty/EmptyState.vue';
 import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import { useDownloadEventStream } from '#/composables/useDownloadEventStream';
+import { useMultiVersionDownload } from '#/composables/useMultiVersionDownload';
 import { useAppNotification } from '#/utils/notify';
 
 import DownloadModal from './components/DownloadModal.vue';
@@ -48,6 +49,7 @@ const favicons = ref<Record<string, string>>({});
 const faviconLoadFailed = ref<Record<string, boolean>>({});
 const viewMode = ref<'grid' | 'list'>('grid');
 const { start: startSSE, stop: stopSSE } = useDownloadEventStream();
+const multiVersionDownload = useMultiVersionDownload();
 
 const downloadModalVisible = ref(false);
 const downloadModalLoading = ref(false);
@@ -256,13 +258,14 @@ async function onDownloadSettingChange(val: null | string) {
 
 async function confirmDownload() {
   if (!downloadResource.value) return;
+  const resource = downloadResource.value;
   downloadModalLoading.value = true;
   try {
-    let enclosure = downloadResource.value.enclosure || '';
-    if (!enclosure && downloadResource.value.page_url) {
+    let enclosure = resource.enclosure || '';
+    if (!enclosure && resource.page_url) {
       const res: any = await resolveDownloadUrlApi({
-        page_url: downloadResource.value.page_url,
-        enclosure: downloadResource.value.enclosure,
+        page_url: resource.page_url,
+        enclosure: resource.enclosure,
       });
       enclosure = res?.data?.url || res?.url || '';
     }
@@ -270,22 +273,29 @@ async function confirmDownload() {
       notification.error('无法获取下载链接');
       return;
     }
-    await addTorrentApi({
-      urls: [enclosure],
-      dl_dir: selectedDownloadDir.value || undefined,
-      dl_setting: selectedDownloadSetting.value || undefined,
-      page_url: downloadResource.value.page_url || undefined,
-      upload_volume_factor:
-        downloadResource.value.uploadvolumefactor ?? undefined,
-      download_volume_factor:
-        downloadResource.value.downloadvolumefactor ?? undefined,
-      title: downloadResource.value.title || undefined,
-      description: downloadResource.value.description || undefined,
-      site: downloadResource.value.indexer || undefined,
-      size: downloadResource.value.size ?? undefined,
-    });
-    notification.success('下载任务已提交');
-    downloadModalVisible.value = false;
+    const done = await multiVersionDownload.submit(
+      (strategy?: string) =>
+        addTorrentApi({
+          confirm_strategy: strategy,
+          urls: [enclosure],
+          dl_dir: selectedDownloadDir.value || undefined,
+          dl_setting: selectedDownloadSetting.value || undefined,
+          page_url: resource.page_url || undefined,
+          upload_volume_factor: resource.uploadvolumefactor ?? undefined,
+          download_volume_factor: resource.downloadvolumefactor ?? undefined,
+          title: resource.title || undefined,
+          description: resource.description || undefined,
+          site: resource.indexer || undefined,
+          size: resource.size ?? undefined,
+        }),
+      {
+        successMessage: () => {
+          notification.success('下载任务已提交');
+          downloadModalVisible.value = false;
+        },
+      },
+    );
+    if (!done) return;
   } catch {
     // 全局请求拦截器已展示错误提示
   } finally {

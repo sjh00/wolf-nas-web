@@ -39,6 +39,7 @@ import PageHeader from '#/components/page/PageHeader.vue';
 import SubscribeConfirmModal from '#/components/subscribe/SubscribeConfirmModal.vue';
 import SubscribeEditModal from '#/components/subscribe/SubscribeEditModal.vue';
 import { useDownloadEventStream } from '#/composables/useDownloadEventStream';
+import { useMultiVersionDownload } from '#/composables/useMultiVersionDownload';
 import { useSearchProgress } from '#/composables/useSearchProgress';
 import { useAppNotification } from '#/utils/notify';
 import { useResourceHelpers } from '#/views/site/resources/composables/useResourceHelpers';
@@ -122,6 +123,7 @@ const route = useRoute();
 const router = useRouter();
 const notification = useAppNotification();
 const { start: startSSE, stop: stopSSE } = useDownloadEventStream();
+const multiVersionDownload = useMultiVersionDownload();
 
 const subscribeConfirmShow = ref(false);
 const subscribeConfirmItem = ref<null | SubscribeConfirmItem>(null);
@@ -1083,13 +1085,25 @@ async function confirmDownload() {
   if (!downloadTorrentId.value) return;
   downloadModalLoading.value = true;
   try {
-    await downloadSearchResultApi(
-      downloadTorrentId.value,
-      selectedDownloadDir.value || undefined,
-      selectedDownloadSetting.value || undefined,
+    const done = await multiVersionDownload.submit(
+      (strategy?: string) =>
+        downloadSearchResultApi(
+          downloadTorrentId.value,
+          selectedDownloadDir.value || undefined,
+          selectedDownloadSetting.value || undefined,
+          strategy,
+        ),
+      {
+        successMessage: () => {
+          notification.success('下载任务已提交');
+          downloadModalVisible.value = false;
+        },
+      },
     );
-    notification.success('下载任务已提交');
-    downloadModalVisible.value = false;
+    if (!done) {
+      // 取消：保持弹窗
+      return;
+    }
   } catch (error: any) {
     notification.error('下载失败', {
       description: error?.message || '未知错误',
