@@ -584,6 +584,14 @@ export async function searchFilesApi(keyword: string, limit?: number) {
   }>(`/media/search/files?${query.toString()}`);
 }
 
+/** 手动构建文件索引（后台执行，非阻塞） */
+export async function refreshFileIndexApi() {
+  return requestClient.post<{ indexed?: number; ready?: boolean }>(
+    '/media/index/refresh',
+    {},
+  );
+}
+
 /** 版本文件项 */
 export interface FileVersionItem {
   source_filename: string;
