@@ -625,6 +625,19 @@ export async function getLibraryDuplicatesApi(limit?: number) {
   }>(`/media/library/duplicates?${query.toString()}`);
 }
 
+/** 按文件锚点清理硬链接链（媒体库+做种+记录+下载器任务） */
+export async function cleanupFileChainApi(filePath: string) {
+  return requestClient.post<{
+    anchor: string;
+    chain_files: string[];
+    deleted_files: string[];
+    deleted_transfer_logs: number;
+    deleted_torrents: Array<{ downloader: string; ids: string[] }>;
+  }>('/media/cleanup', {
+    file_path: filePath,
+  });
+}
+
 /** 获取媒体库路径配置 */
 export async function getMediaLibraryConfigApi() {
   return requestClient.post<{

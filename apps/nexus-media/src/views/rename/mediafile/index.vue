@@ -767,6 +767,38 @@ onMounted(() => nav.init());
       </p>
     </NModal>
 
+    <!-- 清理关联内容确认 -->
+    <NModal
+      v-model:show="actions.cleanupDialog.value.show"
+      title="清理关联内容"
+      preset="dialog"
+      type="warning"
+      positive-text="清理"
+      negative-text="取消"
+      :positive-button-props="{ loading: actions.cleanupLoading.value }"
+      @positive-click="actions.handleCleanup"
+    >
+      <p v-if="actions.cleanupDialog.value.items.length > 0">
+        将以
+        <strong>{{ actions.cleanupDialog.value.items[0]?.name }}</strong>
+        为锚点，清理其硬链接链上的全部关联内容：
+      </p>
+      <ul>
+        <li>媒体库目标文件</li>
+        <li>对应做种源文件（硬链接兄弟）</li>
+        <li>关联的转移记录、下载记录</li>
+        <li>下载器中的做种任务（含辅种）</li>
+      </ul>
+      <p>
+        <span v-if="actions.cleanupResult.value">
+          已删除文件 {{ actions.cleanupResult.value.deleted_files.length }} 个，
+          转移记录 {{ actions.cleanupResult.value.deleted_transfer_logs }} 条，
+          下载任务 +{{ actions.cleanupResult.value.deleted_torrents?.length || 0 }}。
+        </span>
+        <span v-else>仅删除同一 inode 硬链接链，不影响该作品其它版本。</span>
+      </p>
+    </NModal>
+
     <!-- 识别结果 -->
     <IdentifyResult
       v-model:show="actions.identifyResultShow.value"
