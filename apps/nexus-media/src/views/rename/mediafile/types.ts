@@ -32,6 +32,7 @@ export type SortOrder = 'asc' | 'desc';
 export type SearchScope = 'dir' | 'global';
 
 export type FileActionKey =
+  | 'cleanup'
   | 'copy'
   | 'delete'
   | 'download'

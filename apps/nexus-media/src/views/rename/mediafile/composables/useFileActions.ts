@@ -8,6 +8,7 @@ import { IconifyIcon } from '@vben/icons';
 
 import { findHardlinksApi } from '#/api/modules/download';
 import {
+  cleanupFileChainApi,
   copyFilesApi,
   downloadFileApi,
   downloadSubtitleApi,
@@ -50,6 +51,13 @@ export function useFileActions(deps: ActionsDeps) {
   // ---- 弹窗状态 ----
   const renameDialog = ref({ show: false, path: '', name: '' });
   const deleteDialog = ref({ show: false, items: [] as FileItem[] });
+  const cleanupDialog = ref({ show: false, items: [] as FileItem[] });
+  const cleanupLoading = ref(false);
+  const cleanupResult = ref<{
+    deleted_files: string[];
+    deleted_transfer_logs: number;
+    deleted_torrents: Array<{ downloader: string; ids: string[] }>;
+  } | null>(null);
   const mkdirDialog = ref({ show: false, name: '' });
   const moveCopyDialog = ref({
     show: false,
@@ -100,6 +108,7 @@ export function useFileActions(deps: ActionsDeps) {
     if (single && !single.is_dir) {
       options.push(
         { label: '硬链接查询', key: 'hardlink', icon: menuIcon('lucide:link') },
+        { label: '清理关联内容', key: 'cleanup', icon: menuIcon('lucide:eraser') },
         { label: '重命名', key: 'rename', icon: menuIcon('lucide:pencil') },
       );
     }
@@ -181,6 +190,11 @@ export function useFileActions(deps: ActionsDeps) {
         }
         break;
       }
+      case 'cleanup': {
+        cleanupDialog.value = { show: true, items };
+        cleanupResult.value = null;
+        break;
+      }
     }
   }
 
@@ -214,6 +228,36 @@ export function useFileActions(deps: ActionsDeps) {
     } catch (error: any) {
       notification.error('刮削失败', { description: error?.message || '' });
     }
+  }
+
+  async function handleCleanup() {
+    const items = cleanupDialog.value.items;
+    if (!items.length) return;
+    cleanupLoading.value = true;
+    cleanupResult.value = null;
+    try {
+      const first = items[0];
+      if (!first) return;
+      const res = await cleanupFileChainApi(first.path);
+      cleanupResult.value = res || {
+        deleted_files: [],
+        deleted_transfer_logs: 0,
+        deleted_torrents: [],
+      };
+      notification.success('清理完成');
+      await deps.refresh();
+      deps.clearSelection();
+    } catch (error: any) {
+      notification.error('清理失败', { description: error?.message || '' });
+    } finally {
+      cleanupLoading.value = false;
+    }
+  }
+
+  function closeCleanup() {
+    cleanupDialog.value = { show: false, items: [] };
+    cleanupResult.value = null;
+    cleanupLoading.value = false;
   }
 
   async function handleSubtitle(items: FileItem[]) {
@@ -403,9 +447,14 @@ export function useFileActions(deps: ActionsDeps) {
 
   return {
     buildMenuOptions,
+    cleanupDialog,
+    cleanupLoading,
+    cleanupResult,
+    closeCleanup,
     confirmDelete,
     deleteDialog,
     dispatch,
+    handleCleanup,
     hardlinkConfigForm,
     hardlinkConfigShow,
     hardlinkLoading,
