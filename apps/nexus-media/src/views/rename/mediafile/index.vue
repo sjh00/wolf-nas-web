@@ -10,9 +10,19 @@ import type {
 
 import { computed, onMounted, ref, watch } from 'vue';
 
-import { NButton, NForm, NFormItem, NInput, NModal, NSpin } from 'naive-ui';
+import { IconifyIcon } from '@vben/icons';
 
-import { searchFilesApi } from '#/api/modules/media';
+import {
+  NButton,
+  NForm,
+  NFormItem,
+  NInput,
+  NModal,
+  NSpin,
+  NTag,
+} from 'naive-ui';
+
+import { getLibraryDuplicatesApi, searchFilesApi } from '#/api/modules/media';
 import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import TransferModal from '#/components/media/TransferModal.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
@@ -142,6 +152,67 @@ function clearGlobalSearch() {
   searchKeyword.value = '';
   globalSearchMode.value = false;
   globalSearchResults.value = [];
+}
+
+// ---- 多版本 / 重复文件识别 ----
+const duplicateMode = ref(false);
+const duplicates = ref<
+  Array<{
+    tmdb_id: number;
+    title: string;
+    year: string;
+    dir_count: number;
+    file_count: number;
+    versions: Array<{
+      dest_path: string;
+      dest_filename: string;
+      full_path: string;
+      season_episode: string;
+      date: string;
+      exists: boolean;
+      spec: string;
+      hardlinks: string[];
+    }>;
+  }>
+>([]);
+const duplicateLoading = ref(false);
+const expandedDuplicate = ref<null | number>(null);
+
+async function enterDuplicateMode() {
+  duplicateMode.value = true;
+  globalSearchMode.value = false;
+  await loadDuplicates();
+}
+
+async function loadDuplicates() {
+  duplicateLoading.value = true;
+  try {
+    const res = await getLibraryDuplicatesApi(200);
+    duplicates.value = Array.isArray(res) ? res : res?.items || [];
+  } catch (error: any) {
+    notification.error('加载多版本作品失败', {
+      description: error?.message || '',
+    });
+  } finally {
+    duplicateLoading.value = false;
+  }
+}
+
+function exitDuplicateMode() {
+  duplicateMode.value = false;
+  duplicates.value = [];
+  expandedDuplicate.value = null;
+}
+
+function toggleDuplicate(tmdbId: number) {
+  expandedDuplicate.value = expandedDuplicate.value === tmdbId ? null : tmdbId;
+}
+
+function gotoVersion(version: { dest_path: string; full_path: string }) {
+  // 定位到版本文件所在目录
+  const dir = version.dest_path || parentDir(version.full_path);
+  duplicateMode.value = false;
+  nav.navigateTo(dir === '/' ? '' : dir);
 }
 
 function openSearchResult(item: FileItem) {
@@ -330,6 +401,92 @@ onMounted(() => nav.init());
           @clear="selection.clearSelection"
         />
 
+        <div v-if="!globalSearchMode" class="dup-entry">
+          <NButton size="small" quaternary @click="enterDuplicateMode">
+            <template #icon>
+              <IconifyIcon icon="lucide:copy" class="size-4" />
+            </template>
+            多版本作品
+          </NButton>
+        </div>
+
+        <div class="search-status" v-if="duplicateMode">
+          <span>
+            多版本/重复作品：{{ duplicates.length }} 部（同一作品多个文件）
+          </span>
+          <NButton size="tiny" quaternary @click="exitDuplicateMode">
+            返回浏览
+          </NButton>
+        </div>
+
+        <div v-if="duplicateMode" class="dup-list">
+          <NSpin :show="duplicateLoading">
+            <div
+              v-if="!duplicateLoading && duplicates.length === 0"
+              class="dup-empty"
+            >
+              未发现多版本作品
+            </div>
+            <article
+              v-for="dup in duplicates"
+              :key="dup.tmdb_id"
+              class="dup-card"
+            >
+              <div class="dup-head" @click="toggleDuplicate(dup.tmdb_id)">
+                <div class="dup-title">
+                  {{ dup.title }}
+                  <span v-if="dup.year" class="dup-year">{{ dup.year }}</span>
+                </div>
+                <div class="dup-meta">
+                  {{ dup.file_count }} 个文件
+                  <IconifyIcon
+                    :icon="
+                      expandedDuplicate === dup.tmdb_id
+                        ? 'lucide:chevron-up'
+                        : 'lucide:chevron-down'
+                    "
+                    class="size-4"
+                  />
+                </div>
+              </div>
+              <div
+                v-if="expandedDuplicate === dup.tmdb_id"
+                class="dup-versions"
+              >
+                <div
+                  v-for="(v, i) in dup.versions"
+                  :key="i"
+                  class="dup-version"
+                >
+                  <div class="dup-version-info">
+                    <div class="dup-spec">{{ v.spec || '未知规格' }}</div>
+                    <div class="dup-file">{{ v.dest_filename }}</div>
+                    <div class="dup-state">
+                      <NTag v-if="v.exists" size="tiny" type="success"
+                        >
+存在
+</NTag
+                      >
+                      <NTag v-else size="tiny" type="warning">丢失</NTag>
+                      <span v-if="v.season_episode" class="dup-season">{{
+                        v.season_episode
+                      }}</span>
+                    </div>
+                  </div>
+                  <NButton
+                    size="tiny"
+                    text
+                    type="primary"
+                    @click="gotoVersion(v)"
+                  >
+                    定位
+                  </NButton>
+                </div>
+              </div>
+            </article>
+          </NSpin>
+        </div>
+
         <div v-if="globalSearchMode" class="search-status">
           <span>
             全盘搜索「{{ searchKeyword }}」：{{ globalSearchResults.length }}
@@ -341,7 +498,7 @@ onMounted(() => nav.init());
         </div>
 
         <FileList
-          v-if="viewMode === 'list'"
+          v-if="!duplicateMode && viewMode === 'list'"
           :items="displayItems"
           :loading="globalSearchMode ? globalSearchLoading : nav.loading.value"
           :selected-paths="selection.selectedPaths.value"
@@ -360,7 +517,7 @@ onMounted(() => nav.init());
           @toggle-sort="toggleSort"
         />
         <FileGrid
-          v-else
+          v-else-if="!duplicateMode"
           :items="displayItems"
           :loading="globalSearchMode ? globalSearchLoading : nav.loading.value"
           :selected-paths="selection.selectedPaths.value"
@@ -754,5 +911,114 @@ onMounted(() => nav.init());
   .main-content {
     border-radius: 0.375rem;
   }
+}
+
+/* ========== 多版本 / 重复文件 ========== */
+.dup-entry {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.25rem 0.5rem;
+}
+
+.dup-list {
+  padding: 0.5rem;
+}
+
+.dup-empty {
+  padding: 1.5rem;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
+.dup-card {
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+}
+
+.dup-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.625rem 0.875rem;
+  cursor: pointer;
+  background: hsl(var(--card));
+}
+
+.dup-head:hover {
+  background: hsl(var(--accent));
+}
+
+.dup-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: hsl(var(--card-foreground));
+}
+
+.dup-year {
+  margin-left: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+}
+
+.dup-meta {
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.dup-versions {
+  border-top: 1px solid hsl(var(--border));
+}
+
+.dup-version {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.875rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.dup-version:last-child {
+  border-bottom: none;
+}
+
+.dup-version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.dup-spec {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--primary));
+}
+
+.dup-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.8125rem;
+  color: hsl(var(--card-foreground));
+  white-space: nowrap;
+}
+
+.dup-state {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.dup-season {
+  color: hsl(var(--muted-foreground));
 }
 </style>
