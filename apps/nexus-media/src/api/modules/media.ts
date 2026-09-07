@@ -581,7 +581,17 @@ export async function searchFilesApi(keyword: string, limit?: number) {
     }>;
     ready: boolean;
     total: number;
+    build_time: number;
   }>(`/media/search/files?${query.toString()}`);
+}
+
+/** 文件索引状态（就绪/文件数/最近构建时间） */
+export async function getFileIndexStatusApi() {
+  return requestClient.get<{
+    ready: boolean;
+    indexed: number;
+    build_time: number;
+  }>('/media/index/status');
 }
 
 /** 手动构建文件索引（后台执行，非阻塞） */
