@@ -22,6 +22,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: ./.github/actions/setup-node
+
+      # 前端在原生 runner 构建一次（多架构下避免 QEMU 仿真编译 node/rolldown 卡死）
+      - name: Build Frontend (native)
+        env:
+          CI: true
+          TURBO_CONCURRENCY: 2
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build:nexus
+
       - name: Release version
         id: release_version
         run: |
@@ -50,12 +67,12 @@ jobs:
       - name: Set Tags
         id: tags
         run: |
-          TAGS="ghcr.io/${{ github.repository_owner }}/nexus-media-web:latest
-          ghcr.io/${{ github.repository_owner }}/nexus-media-web:${{ env.app_version }}"
+          TAGS="ghcr.io/${{ github.repository_owner }}/wolf-nas-web:latest
+          ghcr.io/${{ github.repository_owner }}/wolf-nas-web:${{ env.app_version }}"
           if [ -n "${{ env.DOCKERHUB_USER }}" ] && [ -n "${{ env.DOCKERHUB_PWD }}" ]; then
             TAGS="$TAGS
-          ${{ env.DOCKERHUB_USER }}/nexus-media-web:latest
-          ${{ env.DOCKERHUB_USER }}/nexus-media-web:${{ env.app_version }}"
+          ${{ env.DOCKERHUB_USER }}/wolf-nas-web:latest
+          ${{ env.DOCKERHUB_USER }}/wolf-nas-web:${{ env.app_version }}"
           fi
           echo "$TAGS"
           {
@@ -68,7 +85,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./scripts/deploy/Dockerfile
+          file: ./scripts/deploy/Dockerfile.prod
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
@@ -93,7 +110,7 @@ jobs:
           # 尝试从 CHANGELOG.md 提取版本内容
           CONTENT=$(awk '/^## v'"$VERSION"' /{flag=1;next}/^## v/{flag=0}flag' CHANGELOG.md 2>/dev/null || true)
           if [ -z "$CONTENT" ]; then
-            CONTENT="Nexus Media Web $GITHUB_REF_NAME 已发布。"
+            CONTENT="WolfNas Web $GITHUB_REF_NAME 已发布。"
           fi
 
           {
@@ -105,7 +122,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: Nexus Media Web ${{ steps.extract.outputs.tag }}
+          name: WolfNas Web ${{ steps.extract.outputs.tag }}
           body: ${{ steps.extract.outputs.notes }}
           generate_release_notes: false
         env:
@@ -118,9 +135,9 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: html
           message: |
-            <b>Nexus Media Web ${{ steps.extract.outputs.tag }} 已发布</b>
+            <b>WolfNas Web ${{ steps.extract.outputs.tag }} 已发布</b>
 
             <pre>${{ steps.extract.outputs.notes }}</pre>
 
-            📦 Docker: <code>docker pull linyuan0213/nexus-media-web:${{ steps.extract.outputs.version }}</code>
+            📦 Docker: <code>docker pull sjh00/wolf-nas-web:${{ steps.extract.outputs.version }}</code>
             🔗 <a href="https://github.com/${{ github.repository }}/releases/tag/${{ steps.extract.outputs.tag }}">查看 Release</a>

@@ -28,6 +28,7 @@ import {
   uploadAvatarApi,
 } from '#/api';
 import PageHeader from '#/components/page/PageHeader.vue';
+import SiteGrantDrawer from '#/components/system/SiteGrantDrawer.vue';
 
 interface RoleOption {
   label: string;
@@ -58,7 +59,33 @@ const loading = ref(false);
 const editModalShow = ref(false);
 const resetPwdModalShow = ref(false);
 const deleteModalShow = ref(false);
+const grantDrawerShow = ref(false);
+const grantTarget = ref<{
+  id: null | number;
+  name: string;
+  unrestricted: boolean;
+}>({
+  id: null,
+  name: '',
+  unrestricted: false,
+});
+
+function openGrantDrawer(row: UserItem) {
+  grantTarget.value = {
+    id: row.id,
+    name: row.nickname || row.username,
+    unrestricted: !!row.roles?.some((r) => r.role_code === 'superadmin'),
+  };
+  grantDrawerShow.value = true;
+}
 const userStore = useUserStore();
+const canAssignSites = computed(() => {
+  const info: any = userStore.userInfo || {};
+  const perms: string[] = info.permissions || [];
+  return (
+    !!info.is_superadmin || perms.includes('*') || perms.includes('site:assign')
+  );
+});
 const deleteTarget = ref<null | UserItem>(null);
 const editingUser = ref<
   Partial<UserItem> & { password?: string; role_ids?: number[] }
@@ -258,7 +285,16 @@ onMounted(() => {
 
 function getUserActions(row: UserItem) {
   const deleteReason = deleteDisabledReason(row);
-  return [
+  const actions: any[] = [];
+  if (canAssignSites.value) {
+    actions.push({
+      label: '站点授权',
+      key: 'site-grant',
+      icon: () =>
+        h(IconifyIcon, { icon: 'lucide:shield-check', class: 'size-3.5' }),
+    });
+  }
+  actions.push(
     {
       label: '编辑',
       key: 'edit',
@@ -283,7 +319,8 @@ function getUserActions(row: UserItem) {
         ? {}
         : { style: { color: 'hsl(var(--destructive))' } },
     },
-  ] as any;
+  );
+  return actions;
 }
 
 function handleActionSelect(key: string, row: UserItem) {
@@ -299,6 +336,10 @@ function handleActionSelect(key: string, row: UserItem) {
     }
     case 'reset-pwd': {
       openResetPwd(row);
+      break;
+    }
+    case 'site-grant': {
+      openGrantDrawer(row);
       break;
     }
   }
@@ -643,6 +684,15 @@ function handleActionSelect(key: string, row: UserItem) {
       <strong>{{ deleteTarget?.nickname || deleteTarget?.username }}</strong>
       吗？
     </NModal>
+
+    <!-- 站点授权抽屉 -->
+    <SiteGrantDrawer
+      v-model:show="grantDrawerShow"
+      target-type="user"
+      :target-id="grantTarget.id"
+      :target-name="grantTarget.name"
+      :unrestricted="grantTarget.unrestricted"
+    />
   </div>
 </template>
 

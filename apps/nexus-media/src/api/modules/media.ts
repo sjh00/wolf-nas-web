@@ -232,7 +232,7 @@ export interface SiteSearchStatus {
 
 /** WEB搜索（从发现页触发） */
 export async function webSearchApi(params: {
-  filters?: string;
+  filters?: Record<string, any> | string;
   media_type?: string;
   search_word: string;
   tmdbid?: string;
@@ -646,7 +646,7 @@ export async function getLibraryDuplicatesApi(limit?: number) {
 /** 按文件锚点清理硬链接链（媒体库+做种+记录+下载器任务） */
 export async function cleanupFileChainApi(
   filePath: string,
-  options?: { sourcePolicy?: 'remove' | 'keep'; deleteDownloader?: boolean },
+  options?: { sourcePolicy?: 'keep' | 'remove'; deleteDownloader?: boolean },
 ) {
   return requestClient.post<{
     anchor: string;
@@ -663,7 +663,10 @@ export async function cleanupFileChainApi(
 }
 
 /** 媒体库一致性校验（跨盘整理感知）：修正/标注转移记录DEST与磁盘不一致 */
-export async function consistencyCheckApi(pageSize?: number, maxPages?: number) {
+export async function consistencyCheckApi(
+  pageSize?: number,
+  maxPages?: number,
+) {
   return requestClient.post<{
     checked: number;
     fixed: number;
@@ -681,12 +684,13 @@ export async function consistencyCheckApi(pageSize?: number, maxPages?: number) 
 }
 
 /** 文件关系分析（源/媒体库存在性 + 硬链接指向） */
-export interface MediaRelationItem {  id: number;
+export interface MediaRelationItem {
+  id: number;
   tmdb_id: number;
   title: string;
   year: string;
   season_episode: string;
-  state: 'only_source' | 'only_dest' | 'both' | 'none' | 'unknown';
+  state: 'both' | 'none' | 'only_dest' | 'only_source' | 'unknown';
   source: {
     path: string;
     filename: string;

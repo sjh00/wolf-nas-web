@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import {
   NButton,
@@ -31,6 +32,7 @@ import {
   updateRoleApi,
 } from '#/api';
 import PageHeader from '#/components/page/PageHeader.vue';
+import SiteGrantDrawer from '#/components/system/SiteGrantDrawer.vue';
 
 interface PermissionGroup {
   module: string;
@@ -61,6 +63,33 @@ const permissionGroups = ref<PermissionGroup[]>([]);
 const menuTree = ref<MenuTreeNode[]>([]);
 const loading = ref(false);
 const editModalShow = ref(false);
+const grantDrawerShow = ref(false);
+const userStore = useUserStore();
+const canAssignSites = computed(() => {
+  const info: any = userStore.userInfo || {};
+  const perms: string[] = info.permissions || [];
+  return (
+    !!info.is_superadmin || perms.includes('*') || perms.includes('site:assign')
+  );
+});
+const grantTarget = ref<{
+  id: null | number;
+  name: string;
+  unrestricted: boolean;
+}>({
+  id: null,
+  name: '',
+  unrestricted: false,
+});
+
+function openGrantDrawer(item: any) {
+  grantTarget.value = {
+    id: item.id,
+    name: item.role_name,
+    unrestricted: item.role_code === 'superadmin',
+  };
+  grantDrawerShow.value = true;
+}
 const deleteModalShow = ref(false);
 const deleteTarget = ref<null | RoleItem>(null);
 const editingRole = ref<
@@ -358,6 +387,16 @@ onMounted(() => {
             class="flex items-center justify-end gap-2 px-5 py-3 border-t"
             style="border-color: hsl(var(--border))"
           >
+            <NTooltip v-if="canAssignSites">
+              <template #trigger>
+                <NButton text size="small" @click="openGrantDrawer(item)">
+                  <template #icon>
+                    <IconifyIcon icon="lucide:shield-check" class="size-4" />
+                  </template>
+                </NButton>
+              </template>
+              站点授权
+            </NTooltip>
             <NTooltip>
               <template #trigger>
                 <NButton text size="small" @click="handleEdit(item)">
@@ -579,5 +618,14 @@ onMounted(() => {
     >
       确定要删除角色 <strong>{{ deleteTarget?.role_name }}</strong> 吗？
     </NModal>
+
+    <!-- 站点授权抽屉 -->
+    <SiteGrantDrawer
+      v-model:show="grantDrawerShow"
+      target-type="role"
+      :target-id="grantTarget.id"
+      :target-name="grantTarget.name"
+      :unrestricted="grantTarget.unrestricted"
+    />
   </div>
 </template>

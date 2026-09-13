@@ -87,6 +87,16 @@ const seasonLabel = computed(() => {
   return s && s !== 'S00' ? String(s) : '';
 });
 
+// 归属用户（管理员视角可见）：有 username 时展示
+const ownerName = computed(() => {
+  const name = props.item.username;
+  return name ? String(name) : '';
+});
+
+const ownerInitial = computed(() =>
+  ownerName.value ? ownerName.value.slice(0, 1).toUpperCase() : '',
+);
+
 const captionTitle = computed(() => {
   let text = props.item.name || '';
   if (props.type === 'tv' && seasonLabel.value) {
@@ -312,6 +322,15 @@ onMounted(ensureOutsideListener);
               :style="{ width: `${progressPercent}%` }"
             ></div>
           </div>
+        </div>
+        <!-- 归属用户胶囊（管理员视角） -->
+        <div
+          v-if="ownerName"
+          class="shc-owner-pill"
+          :title="`订阅者：${ownerName}`"
+        >
+          <span class="shc-owner-avatar">{{ ownerInitial }}</span>
+          <span class="shc-owner-name">{{ ownerName }}</span>
         </div>
       </div>
     </div>
@@ -575,6 +594,43 @@ onMounted(ensureOutsideListener);
   width: 11px;
   height: 11px;
   fill: currentcolor;
+}
+
+/* 归属用户胶囊（管理员视角，标题下方居中，随渐变区一体隐藏） */
+.shc-owner-pill {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.1rem 0.5rem 0.1rem 0.2rem;
+  margin-top: 0.35rem;
+  font-size: 10px;
+  font-weight: 500;
+  color: hsl(0deg 0% 100% / 90%);
+  background: hsl(0deg 0% 100% / 16%);
+  border: 1px solid hsl(0deg 0% 100% / 22%);
+  border-radius: 9999px;
+  backdrop-filter: blur(2px);
+}
+
+.shc-owner-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+  font-weight: 700;
+  color: hsl(0deg 0% 100%);
+  background: hsl(var(--primary));
+  border-radius: 9999px;
+}
+
+.shc-owner-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shc-poster-caption {

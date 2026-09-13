@@ -1,12 +1,12 @@
 {
   "name": "@wolfnas/frontend",
-  "version": "4.16.1",
-  "homepage": "https://github.com/linyuan0213/nexus-media",
-  "bugs": "https://github.com/linyuan0213/nexus-media/issues",
+  "version": "4.20.16",
+  "homepage": "https://github.com/sjh00/wolf-nas-web",
+  "bugs": "https://github.com/sjh00/wolf-nas-web/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/linyuan0213/nexus-media.git",
-    "directory": "web/frontend/apps/wolfnas"
+    "url": "git+https://github.com/sjh00/wolf-nas-web.git",
+    "directory": "apps/nexus-media"
   },
   "license": "MIT",
   "author": {

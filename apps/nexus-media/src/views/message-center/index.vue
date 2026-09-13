@@ -32,7 +32,7 @@ import {
   streamMessages,
 } from '#/api/modules/agent';
 import { getAllSystemConfigApi } from '#/api/modules/system';
-import { queueOsNotify } from '#/utils/os-notify';
+import { canOsNotify, queueOsNotify } from '#/utils/os-notify';
 import { dispatchUnreadSync } from '#/utils/unread-sync';
 
 import ChatMessage from './components/ChatMessage.vue';
@@ -128,16 +128,13 @@ function saveNotifiedIds() {
   localStorage.setItem(NOTIFIED_KEY, JSON.stringify([...notifiedIds.value]));
 }
 
-/** 页面不在前台且该消息未推送过 → 排队弹 OS 通知（聚合 + 提示音由工具处理） */
+/** 新消息 → 排队弹 OS 通知（去重；已授权才弹并记录） */
 function maybeNotify(item: AgentApi.MessageStreamItem) {
   if (!item.id) return;
   const title = item.title?.trim() || '新消息';
   const body = (item.content || '').trim() || '';
   if (item.kind === 'list') return;
-  if (
-    (document.hidden || !document.hasFocus()) &&
-    !notifiedIds.value.has(item.id)
-  ) {
+  if (canOsNotify() && !notifiedIds.value.has(item.id)) {
     notifiedIds.value.add(item.id);
     saveNotifiedIds();
     queueOsNotify(title, body);
@@ -336,6 +333,27 @@ function scrollToBottom() {
       });
     });
   });
+}
+
+/** 滚动到第一条未读消息（置顶显示）；无未读返回 false */
+function scrollToFirstUnread(): boolean {
+  const idx = messages.value.findIndex((m) => isUnread(m));
+  const target = idx >= 0 ? messages.value[idx] : undefined;
+  if (!target) return false;
+  autoScrolling = true;
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const el = msgElements.get(target.id);
+      const list = listRef.value;
+      if (el && list) {
+        list.scrollTop = Math.max(0, el.offsetTop - 8);
+      }
+      setTimeout(() => {
+        autoScrolling = false;
+      }, 400);
+    });
+  });
+  return true;
 }
 
 function pushMessage(msg: Omit<Message, 'id'>): Message {
@@ -718,11 +736,19 @@ onMounted(async () => {
     { root: listRef.value, threshold: 0.3 },
   );
   await restoreTimeline();
-  // 历史加载完成后重新测量高度并滚到最新消息（底部）
   measureListHeight();
-  scrollToBottom();
-  // 内容渲染稳定后再补一次滚动（图片/富文本异步渲染）
-  window.setTimeout(scrollToBottom, 300);
+  // 打开时定位到第一条未读；全部已读时才滚到最新消息（底部）
+  nextTick(() => {
+    if (!scrollToFirstUnread()) {
+      scrollToBottom();
+    }
+  });
+  // 内容渲染稳定后再补一次（图片/富文本异步渲染会改变高度）
+  window.setTimeout(() => {
+    if (!scrollToFirstUnread()) {
+      scrollToBottom();
+    }
+  }, 300);
   startMessageStream();
   // 未读数；已读由视口观察 + 全部已读按钮 + 切回前台时完成
   refreshUnread();
