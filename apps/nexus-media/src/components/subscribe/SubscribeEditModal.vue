@@ -17,10 +17,9 @@ import {
 import {
   getDownloadDirsApi,
   getDownloadSettingsApi,
-  getIndexersApi,
 } from '#/api/modules/download';
 import { getFilterRulesApi } from '#/api/modules/filter';
-import { getSitesApi } from '#/api/modules/site';
+import { getVisibleSitesApi } from '#/api/modules/site';
 import {
   joinMultiSelect,
   pixOptions,
@@ -159,19 +158,21 @@ watch([() => props.show, () => props.item], async ([visible, item]) => {
 async function loadOptions() {
   loading.value = true;
   try {
-    const [sitesRes, idxRes, rulesRes, dsRes] = await Promise.all([
-      getSitesApi().catch(() => ({ data: [] })),
-      getIndexersApi().catch(() => ({ data: [] })),
+    const [visibleRes, rulesRes, dsRes] = await Promise.all([
+      getVisibleSitesApi().catch(() => ({ data: [] })),
       getFilterRulesApi().catch(() => ({ data: [] })),
       getDownloadSettingsApi().catch(() => ({ data: [] })),
     ]);
-    const sites = Array.isArray(sitesRes) ? sitesRes : sitesRes?.data || [];
-    rssSites.value = sites
-      .filter((s: any) => s.rss_enable)
+    // 站点选项按当前用户授权过滤（rss 用途 → 订阅站点，search 用途 → 搜索站点）
+    const visibleSites = Array.isArray(visibleRes)
+      ? visibleRes
+      : visibleRes?.data || [];
+    rssSites.value = visibleSites
+      .filter((s: any) => (s.permissions || []).includes('rss'))
       .map((s: any) => ({ label: s.name, value: s.name }));
-    searchSites.value = (
-      Array.isArray(idxRes) ? idxRes : idxRes?.data || []
-    ).map((i: any) => ({ label: i.name, value: i.name }));
+    searchSites.value = visibleSites
+      .filter((s: any) => (s.permissions || []).includes('search'))
+      .map((s: any) => ({ label: s.name, value: s.name }));
     const rules = Array.isArray(rulesRes) ? rulesRes : rulesRes?.data || [];
     filterRules.value = [
       { label: '站点规则', value: '' },
@@ -466,6 +467,15 @@ function handleConfirm() {
                 />
               </div>
             </div>
+            <div v-if="rssSites.length === 0" class="site-empty-hint">
+              暂无可用订阅站点，请联系管理员为你授权站点
+            </div>
+            <div
+              v-else-if="form.rss_sites.length === 0"
+              class="site-empty-hint"
+            >
+              未选择时默认使用全部已授权订阅站点
+            </div>
           </div>
         </div>
 
@@ -511,6 +521,15 @@ function handleConfirm() {
                   "
                 />
               </div>
+            </div>
+            <div v-if="searchSites.length === 0" class="site-empty-hint">
+              暂无可用搜索站点，请联系管理员为你授权站点
+            </div>
+            <div
+              v-else-if="form.search_sites.length === 0"
+              class="site-empty-hint"
+            >
+              未选择时默认使用全部已授权搜索站点
             </div>
           </div>
         </div>
@@ -597,6 +616,13 @@ function handleConfirm() {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 0.625rem;
+}
+
+.site-empty-hint {
+  margin-top: 0.5rem;
+  font-size: 11px;
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground));
 }
 
 .site-select-card {

@@ -27,6 +27,7 @@ import {
   getDownloadDirsApi,
   getDownloadSettingsApi,
 } from '#/api/modules/download';
+import { getVisibleSitesApi } from '#/api/modules/site';
 import {
   addSubscriptionApi,
   addSubscriptionMediaApi,
@@ -454,6 +455,42 @@ function toggleSeasonCollapse(key: string) {
 
 // 高级搜索模态框
 const advancedModalVisible = ref(false);
+// 可选索引器（站点）：空 = 全部当前用户可见站点
+const siteOptions = ref<{ label: string; value: string }[]>([]);
+const selectedSites = ref<string[]>([]);
+const SITE_FILTER_KEY = 'media_search_sites';
+
+function buildSiteFilter(): Record<string, any> | undefined {
+  return selectedSites.value.length > 0
+    ? { site: [...selectedSites.value] }
+    : undefined;
+}
+
+async function loadVisibleSites() {
+  try {
+    const res: any = await getVisibleSitesApi();
+    const list = Array.isArray(res) ? res : res?.data || [];
+    siteOptions.value = list
+      .filter((i: any) => (i.permissions || []).includes('search'))
+      .map((i: any) => ({ label: i.name, value: i.name }));
+    const saved = localStorage.getItem(SITE_FILTER_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      selectedSites.value = Array.isArray(parsed)
+        ? parsed.filter((n: string) =>
+            siteOptions.value.some((o) => o.value === n),
+          )
+        : [];
+    }
+  } catch {
+    siteOptions.value = [];
+  }
+}
+
+watch(selectedSites, (val) => {
+  localStorage.setItem(SITE_FILTER_KEY, JSON.stringify(val));
+});
+
 const advancedForm = ref({
   name: '',
   year: '',
@@ -544,6 +581,7 @@ async function handleMediaSearch(media: MediaItem) {
   setSearchKeyword(media.title);
   try {
     const resp: any = await webSearchApi({
+      filters: buildSiteFilter(),
       search_word: media.title,
       tmdbid: String(media.tmdb_id || media.id || ''),
       media_type: media.type || media.media_type || '',
@@ -572,6 +610,7 @@ async function handleAdvancedSearch() {
   loading.value = true;
   try {
     const resp: any = await webSearchApi({
+      filters: buildSiteFilter(),
       search_word: advancedForm.value.name,
       tmdbid: '',
       media_type: advancedForm.value.type,
@@ -668,6 +707,7 @@ function handleKeydown(e: KeyboardEvent) {
 let lastHandledQueryKey = '';
 
 onMounted(() => {
+  loadVisibleSites();
   startSSE();
   // 有进行中的搜索（页面切回）→ 恢复 SSE 连接和进度
   if (resumeOngoingSearch()) return;
@@ -702,7 +742,12 @@ onMounted(() => {
       const mediaType = (route.query.media_type as string) || '';
       displayMode.value = 'torrent';
       loading.value = true;
-      webSearchApi({ search_word: s, tmdbid: tmdbId, media_type: mediaType })
+      webSearchApi({
+        filters: buildSiteFilter(),
+        search_word: s,
+        tmdbid: tmdbId,
+        media_type: mediaType,
+      })
         .then((resp: any) => {
           searchSessionId.value = resp?.session_id || '';
           if (searchSessionId.value)
@@ -722,7 +767,7 @@ onMounted(() => {
       displayMode.value = 'torrent';
       results.value = [];
       loading.value = true;
-      webSearchApi({ search_word: s })
+      webSearchApi({ filters: buildSiteFilter(), search_word: s })
         .then((resp: any) => {
           searchSessionId.value = resp?.session_id || '';
           if (searchSessionId.value)
@@ -760,7 +805,12 @@ watch(
     if (from === 'discovery' || from === 'detail' || from === 'subscription') {
       displayMode.value = 'torrent';
       loading.value = true;
-      webSearchApi({ search_word: s, tmdbid: tmdbId, media_type: mediaType })
+      webSearchApi({
+        filters: buildSiteFilter(),
+        search_word: s,
+        tmdbid: tmdbId,
+        media_type: mediaType,
+      })
         .then((resp: any) => {
           searchSessionId.value = resp?.session_id || '';
           if (searchSessionId.value)
@@ -1149,6 +1199,19 @@ async function confirmDownload() {
           v-model:value="searchtype"
           :options="typeOptions"
           class="search-select"
+        />
+        <NSelect
+          v-model:value="selectedSites"
+          :options="siteOptions"
+          :placeholder="
+            siteOptions.length > 0 ? '全部已授权站点' : '无可用站点'
+          "
+          :disabled="siteOptions.length === 0"
+          multiple
+          clearable
+          filterable
+          :max-tag-count="1"
+          class="search-select site-select"
         />
         <NButton
           type="primary"
@@ -2303,6 +2366,12 @@ async function confirmDownload() {
   gap: 1rem;
 }
 
+.season-table-block {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .season-table-header {
   display: flex;
   gap: 0.5rem;
@@ -2504,6 +2573,13 @@ async function confirmDownload() {
   opacity: 1;
 }
 
+/* 触屏没有 hover：下载/详情按钮保持可见，否则移动端看不到 */
+@media (hover: none) {
+  .td-actions {
+    opacity: 1;
+  }
+}
+
 .tbl-btn {
   padding: 0.1563rem 0.375rem;
   font-family: inherit;
@@ -2588,6 +2664,10 @@ async function confirmDownload() {
   width: 140px;
 }
 
+.site-select {
+  width: 200px;
+}
+
 .search-btn {
   gap: 0.25rem;
 }
@@ -2603,7 +2683,8 @@ async function confirmDownload() {
 
 @media (max-width: 640px) {
   .search-input,
-  .search-select {
+  .search-select,
+  .site-select {
     width: 100%;
   }
 }
@@ -2673,5 +2754,98 @@ async function confirmDownload() {
 .resource-tag-edition {
   color: hsl(var(--tag-edition));
   background-color: hsl(var(--tag-edition) / 20%);
+}
+
+/* Mobile：结果表转卡片布局，避免横向切列 */
+@media (max-width: 900px) {
+  .season-table-block {
+    overflow: visible;
+  }
+
+  .torrent-table,
+  .torrent-table tbody {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+  }
+
+  .torrent-table thead {
+    display: none;
+  }
+
+  .torrent-tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem 0.75rem;
+    padding: 0.625rem 0.75rem;
+    margin-bottom: 0.625rem;
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border) / 60%);
+    border-radius: var(--radius);
+  }
+
+  .torrent-tr:hover td {
+    background: transparent;
+  }
+
+  .torrent-tr td {
+    display: inline-block;
+    padding: 0;
+    white-space: normal;
+    background: transparent;
+    border: none;
+  }
+
+  .torrent-tr td.td-site {
+    width: 100%;
+    font-weight: 600;
+  }
+
+  .torrent-tr td.td-title {
+    width: 100%;
+    max-width: none;
+  }
+
+  .torrent-tr td.td-seed,
+  .torrent-tr td.td-size,
+  .torrent-tr td.td-free {
+    margin-right: 0.75rem;
+    font-size: 0.75rem;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .torrent-tr td.td-seed::before {
+    content: '做种 ';
+  }
+
+  .torrent-tr td.td-size::before {
+    content: '大小 ';
+  }
+
+  .torrent-tr td.td-free::before {
+    content: '促销 ';
+  }
+
+  .torrent-tr td.td-free {
+    color: hsl(var(--success));
+  }
+
+  .torrent-tr > td:last-child {
+    width: 100%;
+  }
+
+  .torrent-tr .td-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    width: 100%;
+    margin-top: 0.125rem;
+    opacity: 1;
+  }
+
+  .torrent-tr .td-actions .tbl-btn.gh {
+    order: -1;
+  }
 }
 </style>

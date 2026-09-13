@@ -17,8 +17,8 @@ export const overridesPreferences = defineOverridesPreferences({
   logo: {
     enable: true,
     fit: 'contain',
-    source: '/static/img/logo/logo-web-apple-180-transparent.png',
-    sourceDark: '/static/img/logo/logo-web-apple-180-transparent.png', // 可选：暗色主题logo
+    source: '/static/img/logo/logo-mark.png',
+    sourceDark: '/static/img/logo/logo-mark.png', // 可选：暗色主题logo
   },
   theme: {
     mode: 'light',
@@ -32,7 +32,7 @@ export const overridesPreferences = defineOverridesPreferences({
   },
   copyright: {
     companyName: 'WolfNas',
-    companySiteLink: 'https://github.com/linyuan0213/nexus-media',
+    companySiteLink: 'https://github.com/sjh00/wolf-nas-tools',
     date: '2026',
     enable: true,
     icp: '',
