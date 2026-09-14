@@ -15,6 +15,7 @@ RUN chmod +x /docker-entrypoint.sh
 
 ENV BACKEND_HOST=wolfnas
 ENV BACKEND_PORT=8080
+ENV LISTEN_PORT=8080
 
 EXPOSE 8080
 
