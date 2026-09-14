@@ -13,7 +13,7 @@ COPY scripts/deploy/nginx.conf.template /etc/nginx/nginx.conf.template
 COPY scripts/deploy/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-ENV BACKEND_HOST=nexus-media
+ENV BACKEND_HOST=wolfnas
 ENV BACKEND_PORT=8080
 
 EXPOSE 8080

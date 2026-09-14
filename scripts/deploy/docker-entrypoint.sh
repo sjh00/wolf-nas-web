@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-BACKEND_HOST="${BACKEND_HOST:-nexus-media}"
+BACKEND_HOST="${BACKEND_HOST:-wolfnas}"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
 
 export BACKEND_HOST BACKEND_PORT
