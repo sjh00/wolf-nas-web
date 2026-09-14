@@ -43,7 +43,7 @@ COPY --from=builder /app/scripts/deploy/docker-entrypoint.sh /docker-entrypoint.
 RUN chmod +x /docker-entrypoint.sh
 
 # 默认值（docker-compose 中无需设置，docker run 时通过 -e 覆盖）
-ENV BACKEND_HOST=nexus-media
+ENV BACKEND_HOST=wolfnas
 ENV BACKEND_PORT=8080
 
 EXPOSE 8080
