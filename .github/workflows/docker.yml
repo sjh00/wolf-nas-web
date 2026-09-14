@@ -68,25 +68,18 @@ jobs:
           TAGS="ghcr.io/${OWNER}/wolf-nas-web:latest"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VER="${GITHUB_REF_NAME#v}"
-            TAGS="${TAGS}
-ghcr.io/${OWNER}/wolf-nas-web:${VER}"
+            TAGS="${TAGS},ghcr.io/${OWNER}/wolf-nas-web:${VER}"
           else
             VER="latest"
           fi
           echo "app_version=${VER}" >> "$GITHUB_ENV"
-          if [ -n "${{ env.DOCKERHUB_USER }}" ] && [ -n "${{ env.DOCKERHUB_PWD }}" ]; then
-            TAGS="${TAGS}
-${{ env.DOCKERHUB_USER }}/wolf-nas-web:latest"
+          if [ -n "${DOCKERHUB_USER}" ] && [ -n "${DOCKERHUB_PWD}" ]; then
+            TAGS="${TAGS},${DOCKERHUB_USER}/wolf-nas-web:latest"
             if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-              TAGS="${TAGS}
-${{ env.DOCKERHUB_USER }}/wolf-nas-web:${VER}"
+              TAGS="${TAGS},${DOCKERHUB_USER}/wolf-nas-web:${VER}"
             fi
           fi
-          {
-            echo 'tags<<EOF'
-            echo "$TAGS"
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and Push Image
         uses: docker/build-push-action@v7
