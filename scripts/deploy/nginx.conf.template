@@ -45,7 +45,7 @@ http {
   gzip_vary on;
 
   server {
-    listen 8080;
+    listen ${LISTEN_PORT};
     server_name localhost;
     merge_slashes off;
 
