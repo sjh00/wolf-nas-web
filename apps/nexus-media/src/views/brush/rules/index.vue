@@ -27,7 +27,10 @@ import {
 import RangeField from '#/components/brush/RangeField.vue';
 import EmptyState from '#/components/empty/EmptyState.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
-import { getOriginalLanguageLabel, ORIGINAL_LANGUAGE_OPTIONS } from '#/constants/filterOptions';
+import {
+  getOriginalLanguageLabel,
+  ORIGINAL_LANGUAGE_OPTIONS,
+} from '#/constants/filterOptions';
 import { brushRuleActualType, parseBrushRuleObj } from '#/utils/brush';
 import { useAppNotification } from '#/utils/notify';
 

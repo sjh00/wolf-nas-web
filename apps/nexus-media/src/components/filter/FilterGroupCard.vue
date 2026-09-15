@@ -339,11 +339,7 @@ function handleTest() {
               <NTag v-if="rule.free_text" size="tiny" type="info">
                 {{ rule.free_text }}
               </NTag>
-              <NTag
-                v-if="rule.original_language"
-                size="tiny"
-                type="success"
-              >
+              <NTag v-if="rule.original_language" size="tiny" type="success">
                 原始语言: {{ getOriginalLanguageLabel(rule.original_language) }}
               </NTag>
             </div>

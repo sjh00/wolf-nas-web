@@ -53,11 +53,11 @@ export function useFileActions(deps: ActionsDeps) {
   const deleteDialog = ref({ show: false, items: [] as FileItem[] });
   const cleanupDialog = ref({ show: false, items: [] as FileItem[] });
   const cleanupLoading = ref(false);
-  const cleanupResult = ref<{
+  const cleanupResult = ref<null | {
     deleted_files: string[];
     deleted_transfer_logs: number;
     deleted_torrents: Array<{ downloader: string; ids: string[] }>;
-  } | null>(null);
+  }>(null);
   const mkdirDialog = ref({ show: false, name: '' });
   const moveCopyDialog = ref({
     show: false,
@@ -108,7 +108,11 @@ export function useFileActions(deps: ActionsDeps) {
     if (single && !single.is_dir) {
       options.push(
         { label: '硬链接查询', key: 'hardlink', icon: menuIcon('lucide:link') },
-        { label: '清理关联内容', key: 'cleanup', icon: menuIcon('lucide:eraser') },
+        {
+          label: '清理关联内容',
+          key: 'cleanup',
+          icon: menuIcon('lucide:eraser'),
+        },
         { label: '重命名', key: 'rename', icon: menuIcon('lucide:pencil') },
       );
     }

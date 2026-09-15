@@ -13,7 +13,11 @@ import {
   NSpin,
 } from 'naive-ui';
 
-import { migrateMediaApi, migrateMediaPlanApi, getOrphanSourcesApi } from '#/api/modules/media';
+import {
+  getOrphanSourcesApi,
+  migrateMediaApi,
+  migrateMediaPlanApi,
+} from '#/api/modules/media';
 import { getSyncTasksApi, type SyncApi } from '#/api/modules/sync';
 import { useAppNotification } from '#/utils/notify';
 
@@ -34,7 +38,7 @@ interface DiskOption {
   label: string;
 }
 const diskOptions = ref<DiskOption[]>([]);
-const selectedDisk = ref<string | null>(null);
+const selectedDisk = ref<null | string>(null);
 const selectedSource = ref('');
 const selectedDest = ref('');
 const crossDrive = ref(false);
@@ -116,9 +120,7 @@ async function confirmMigrate() {
     });
     const failedCount = (res as any)?.failed?.length || 0;
     notification.success(
-      failedCount > 0
-        ? `迁移完成（${failedCount} 项失败）`
-        : '迁移完成',
+      failedCount > 0 ? `迁移完成（${failedCount} 项失败）` : '迁移完成',
       {
         description: `迁移目录 ${(res as any)?.migrated_dirs?.length || 0} 个，孤儿源 ${
           (res as any)?.orphan_removed?.length || 0
@@ -181,7 +183,12 @@ watch(
         <NFormItem label="目标盘" required>
           <NSelect
             v-model:value="selectedDisk"
-            :options="diskOptions.map((d) => ({ label: d.label, value: `${d.source}|${d.dest}` }))"
+            :options="
+              diskOptions.map((d) => ({
+                label: d.label,
+                value: `${d.source}|${d.dest}`,
+              }))
+            "
             placeholder="选择目标盘的目录同步配置（源目录 → 媒体库目录）"
             clearable
             @update:value="onDiskChange"
@@ -189,11 +196,17 @@ watch(
         </NFormItem>
 
         <NFormItem label="目标源目录（btstore）" required>
-          <NInput v-model:value="selectedSource" placeholder="目标盘的做种源目录" />
+          <NInput
+            v-model:value="selectedSource"
+            placeholder="目标盘的做种源目录"
+          />
         </NFormItem>
 
         <NFormItem label="目标媒体库目录（medialink）" required>
-          <NInput v-model:value="selectedDest" placeholder="目标盘的媒体库目录" />
+          <NInput
+            v-model:value="selectedDest"
+            placeholder="目标盘的媒体库目录"
+          />
         </NFormItem>
 
         <NAlert type="info" :show-icon="true" class="mb-3">
@@ -206,7 +219,9 @@ watch(
           :show-icon="true"
           class="mb-3"
         >
-          检测到 <strong>{{ orphanCount }}</strong> 个孤儿源文件（有源文件但下载器中无做种任务，通常是删除记录时残留的）。请选择处理方式：
+          检测到
+          <strong>{{ orphanCount }}</strong>
+          个孤儿源文件（有源文件但下载器中无做种任务，通常是删除记录时残留的）。请选择处理方式：
         </NAlert>
 
         <NFormItem v-if="orphanCount > 0" label="孤儿源文件处理">
@@ -223,7 +238,9 @@ watch(
         <div class="flex items-center gap-6">
           <div class="flex items-center gap-2">
             <NCheckbox v-model:checked="crossDrive" />
-            <span class="text-sm">勾选表示跨盘（不同文件系统，复制后删旧）</span>
+            <span class="text-sm"
+              >勾选表示跨盘（不同文件系统，复制后删旧）</span
+            >
           </div>
           <div class="flex items-center gap-2">
             <NCheckbox v-model:checked="moveTorrents" />

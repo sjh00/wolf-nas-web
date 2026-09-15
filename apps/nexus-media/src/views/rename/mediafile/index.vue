@@ -8,6 +8,8 @@ import type {
   ViewMode,
 } from './types';
 
+import type { MediaRelationItem, OrphanSourceItem } from '#/api/modules/media';
+
 import { computed, onMounted, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
@@ -34,7 +36,6 @@ import {
   refreshFileIndexApi,
   searchFilesApi,
 } from '#/api/modules/media';
-import type { MediaRelationItem, OrphanSourceItem } from '#/api/modules/media';
 import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import MediaMigrateModal from '#/components/media/MediaMigrateModal.vue';
 import TransferModal from '#/components/media/TransferModal.vue';
@@ -84,7 +85,11 @@ const globalSearchLoading = ref(false);
 const globalSearchIndexed = ref(0);
 const globalSearchReady = ref(false);
 const indexRefreshing = ref(false);
-const indexInfo = ref<null | { ready: boolean; indexed: number; build_time: number }>(null);
+const indexInfo = ref<null | {
+  ready: boolean;
+  indexed: number;
+  build_time: number;
+}>(null);
 const highlightPath = ref('');
 
 const INDEX_STALE_DAYS = 7;
@@ -110,7 +115,8 @@ const indexStale = computed(() => {
 const indexTooltipText = computed(() => {
   const t = indexInfo.value?.build_time || 0;
   const count = indexInfo.value?.indexed ?? 0;
-  let text = '为“全盘搜索”建立文件索引。默认不自动扫描（避免频繁唤醒休眠盘），手动点击后后台扫描媒体库与同步源目录。';
+  let text =
+    '为“全盘搜索”建立文件索引。默认不自动扫描（避免频繁唤醒休眠盘），手动点击后后台扫描媒体库与同步源目录。';
   if (t) {
     text += ` 最近构建：${indexBuildText.value}，已索引 ${count} 项。`;
     if (indexStale.value) {
@@ -214,7 +220,8 @@ async function handleRefreshIndex() {
   try {
     await refreshFileIndexApi();
     notification.info('索引构建已触发', {
-      description: '正在后台扫描媒体库与同步源目录，构建完成后显示更新时间与文件数。',
+      description:
+        '正在后台扫描媒体库与同步源目录，构建完成后显示更新时间与文件数。',
     });
     // 轮询状态直到构建时间更新（最长 ~120 秒）
     const before = indexInfo.value?.build_time || 0;
@@ -310,7 +317,7 @@ const relationExpanded = ref<null | number>(null);
 
 // 作品级跨盘迁移
 const migrateModalShow = ref(false);
-const migrateTmdbId = ref<undefined | number>(undefined);
+const migrateTmdbId = ref<number | undefined>(undefined);
 
 function openMigrateFor(id: number) {
   migrateTmdbId.value = id;
@@ -318,7 +325,7 @@ function openMigrateFor(id: number) {
 }
 
 // ---- 孤儿源文件（有源文件但下载器无做种任务） ----
-const relationTab = ref<'relation' | 'orphan'>('relation');
+const relationTab = ref<'orphan' | 'relation'>('relation');
 const orphanLoading = ref(false);
 const orphanItems = ref<OrphanSourceItem[]>([]);
 const orphanTotal = ref(0);
@@ -338,7 +345,7 @@ async function loadOrphans() {
   }
 }
 
-async function switchRelationTab(tab: 'relation' | 'orphan') {
+async function switchRelationTab(tab: 'orphan' | 'relation') {
   relationTab.value = tab;
   if (tab === 'orphan') {
     await loadOrphans();
@@ -347,7 +354,6 @@ async function switchRelationTab(tab: 'relation' | 'orphan') {
     void loadRelations();
   }
 }
-
 
 const relationStateOptions = [
   { label: '全部', value: '' },
@@ -375,7 +381,9 @@ function relationStateLabel(state: string): string {
   }
 }
 
-function relationTagType(state: string): 'success' | 'warning' | 'error' | 'info' | 'default' {
+function relationTagType(
+  state: string,
+): 'default' | 'error' | 'info' | 'success' | 'warning' {
   switch (state) {
     case 'both':
       return 'success';
@@ -767,11 +775,9 @@ onMounted(() => {
                     <div class="dup-spec">{{ v.spec || '未知规格' }}</div>
                     <div class="dup-file">{{ v.dest_filename }}</div>
                     <div class="dup-state">
-                      <NTag v-if="v.exists" size="tiny" type="success"
-                        >
-存在
-</NTag
-                      >
+                      <NTag v-if="v.exists" size="tiny" type="success">
+                        存在
+                      </NTag>
                       <NTag v-else size="tiny" type="warning">丢失</NTag>
                       <span v-if="v.season_episode" class="dup-season">{{
                         v.season_episode
@@ -1110,7 +1116,9 @@ onMounted(() => {
         <span v-if="actions.cleanupResult.value">
           已删除文件 {{ actions.cleanupResult.value.deleted_files.length }} 个，
           转移记录 {{ actions.cleanupResult.value.deleted_transfer_logs }} 条，
-          下载任务 +{{ actions.cleanupResult.value.deleted_torrents?.length || 0 }}。
+          下载任务 +{{
+            actions.cleanupResult.value.deleted_torrents?.length || 0
+          }}。
         </span>
         <span v-else>仅删除同一 inode 硬链接链，不影响该作品其它版本。</span>
       </p>
@@ -1132,19 +1140,17 @@ onMounted(() => {
       positive-text="知道了"
     >
       <p>
-        共检查 <strong>{{ consistencyResult?.checked ?? 0 }}</strong> 条转移记录，
-        已修正 <strong>{{ consistencyResult?.fixed ?? 0 }}</strong> 条，
-        丢失 <strong>{{ consistencyResult?.missing ?? 0 }}</strong> 条。
+        共检查
+        <strong>{{ consistencyResult?.checked ?? 0 }}</strong> 条转移记录，
+        已修正 <strong>{{ consistencyResult?.fixed ?? 0 }}</strong> 条， 丢失
+        <strong>{{ consistencyResult?.missing ?? 0 }}</strong> 条。
       </p>
       <template v-if="(consistencyResult?.missing_records?.length || 0) > 0">
         <p class="mt-2 text-sm text-muted-foreground">
           以下记录的目标文件在磁盘上未找到，且无法定位移动后的新位置：
         </p>
         <ul class="mt-1 max-h-60 list-disc overflow-auto pl-5 text-sm">
-          <li
-            v-for="item in consistencyResult!.missing_records"
-            :key="item.id"
-          >
+          <li v-for="item in consistencyResult!.missing_records" :key="item.id">
             {{ item.expected }}
           </li>
         </ul>
@@ -1207,72 +1213,84 @@ onMounted(() => {
         </div>
 
         <NSpin :show="relationLoading">
-          <div v-if="!relationLoading && relations.length === 0" class="relation-empty">
-          未找到相关记录
-        </div>
-        <div v-for="rel in relations" :key="rel.id" class="relation-card">
-          <div class="relation-head" @click="toggleRelation(rel.id)">
-            <NTag :type="relationTagType(rel.state)" size="small">
-              {{ relationStateLabel(rel.state) }}
-            </NTag>
-            <span class="relation-title">{{ rel.title }} ({{ rel.year }})</span>
-            <span v-if="rel.season_episode" class="relation-season">
-              {{ rel.season_episode }}
-            </span>
-            <NButton
-              size="tiny"
-              quaternary
-              class="ml-auto"
-              @click.stop="openMigrateFor(rel.tmdb_id)"
-            >
-              <template #icon>
-                <IconifyIcon icon="lucide:hard-drive" class="size-3.5" />
-              </template>
-              迁移
-            </NButton>
-            <span class="relation-arrow">
-              {{ relationExpanded === rel.id ? '▲' : '▼' }}
-            </span>
+          <div
+            v-if="!relationLoading && relations.length === 0"
+            class="relation-empty"
+          >
+            未找到相关记录
           </div>
-          <div v-if="relationExpanded === rel.id" class="relation-detail">
-            <div class="relation-file">
-              <span class="relation-side">源文件</span>
-              <span :class="rel.source.exists ? 'ok' : 'miss'">
-                {{ rel.source.exists ? '✓ 存在' : '✗ 缺失' }}
+          <div v-for="rel in relations" :key="rel.id" class="relation-card">
+            <div class="relation-head" @click="toggleRelation(rel.id)">
+              <NTag :type="relationTagType(rel.state)" size="small">
+                {{ relationStateLabel(rel.state) }}
+              </NTag>
+              <span class="relation-title"
+                >{{ rel.title }} ({{ rel.year }})</span
+              >
+              <span v-if="rel.season_episode" class="relation-season">
+                {{ rel.season_episode }}
               </span>
-              <span class="relation-path">{{ rel.source.full_path || '—' }}</span>
-              <div v-if="rel.source.hardlinks?.length" class="relation-links">
-                硬链接 ➜
-                <span
-                  v-for="(link, i) in rel.source.hardlinks"
-                  :key="i"
-                  class="relation-link"
-                >
-                  {{ link }}
+              <NButton
+                size="tiny"
+                quaternary
+                class="ml-auto"
+                @click.stop="openMigrateFor(rel.tmdb_id)"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:hard-drive" class="size-3.5" />
+                </template>
+                迁移
+              </NButton>
+              <span class="relation-arrow">
+                {{ relationExpanded === rel.id ? '▲' : '▼' }}
+              </span>
+            </div>
+            <div v-if="relationExpanded === rel.id" class="relation-detail">
+              <div class="relation-file">
+                <span class="relation-side">源文件</span>
+                <span :class="rel.source.exists ? 'ok' : 'miss'">
+                  {{ rel.source.exists ? '✓ 存在' : '✗ 缺失' }}
                 </span>
+                <span class="relation-path">{{
+                  rel.source.full_path || '—'
+                }}</span>
+                <div v-if="rel.source.hardlinks?.length" class="relation-links">
+                  硬链接 ➜
+                  <span
+                    v-for="(link, i) in rel.source.hardlinks"
+                    :key="i"
+                    class="relation-link"
+                  >
+                    {{ link }}
+                  </span>
+                </div>
+              </div>
+              <div class="relation-file">
+                <span class="relation-side">媒体库</span>
+                <span :class="rel.dest.exists ? 'ok' : 'miss'">
+                  {{ rel.dest.exists ? '✓ 存在' : '✗ 缺失' }}
+                </span>
+                <span class="relation-path">{{
+                  rel.dest.full_path || '—'
+                }}</span>
+                <div v-if="rel.dest.hardlinks?.length" class="relation-links">
+                  硬链接 ➜
+                  <span
+                    v-for="(link, i) in rel.dest.hardlinks"
+                    :key="i"
+                    class="relation-link"
+                  >
+                    {{ link }}
+                  </span>
+                </div>
               </div>
             </div>
-            <div class="relation-file">
-              <span class="relation-side">媒体库</span>
-              <span :class="rel.dest.exists ? 'ok' : 'miss'">
-                {{ rel.dest.exists ? '✓ 存在' : '✗ 缺失' }}
-              </span>
-              <span class="relation-path">{{ rel.dest.full_path || '—' }}</span>
-              <div v-if="rel.dest.hardlinks?.length" class="relation-links">
-                硬链接 ➜
-                <span
-                  v-for="(link, i) in rel.dest.hardlinks"
-                  :key="i"
-                  class="relation-link"
-                >
-                  {{ link }}
-                </span>
-              </div>
-            </div>
           </div>
-        </div>
 
-          <div v-if="relationTotal > relationPageSize" class="relation-pagination">
+          <div
+            v-if="relationTotal > relationPageSize"
+            class="relation-pagination"
+          >
             <NPagination
               v-model:page="relationPage"
               :page-size="relationPageSize"
@@ -1286,13 +1304,18 @@ onMounted(() => {
       <!-- 孤儿源文件视图 -->
       <div v-else>
         <NSpin :show="orphanLoading">
-          <div v-if="!orphanLoading && orphanItems.length === 0" class="relation-empty">
+          <div
+            v-if="!orphanLoading && orphanItems.length === 0"
+            class="relation-empty"
+          >
             无孤儿源文件（源文件均有对应下载做种任务）
           </div>
           <div v-for="item in orphanItems" :key="item.id" class="relation-card">
             <div class="relation-head" @click="openMigrateFor(item.tmdb_id)">
               <NTag type="error" size="small">孤儿源</NTag>
-              <span class="relation-title">{{ item.title }} ({{ item.year }})</span>
+              <span class="relation-title"
+                >{{ item.title }} ({{ item.year }})</span
+              >
               <span v-if="item.season_episode" class="relation-season">
                 {{ item.season_episode }}
               </span>
@@ -1607,8 +1630,8 @@ onMounted(() => {
   margin-bottom: 0.75rem;
 
   .relation-filter {
-    width: 180px;
     flex-shrink: 0;
+    width: 180px;
   }
 
   .n-input {
@@ -1624,8 +1647,8 @@ onMounted(() => {
 
 .relation-empty {
   padding: 2rem;
-  text-align: center;
   color: hsl(var(--muted-foreground));
+  text-align: center;
 }
 
 .relation-card {
@@ -1669,18 +1692,18 @@ onMounted(() => {
 
 .relation-file {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
   padding: 0.125rem 0;
   font-size: 0.8125rem;
-  flex-wrap: wrap;
 }
 
 .relation-side {
   flex-shrink: 0;
+  width: 3.5rem;
   font-weight: 600;
   color: hsl(var(--muted-foreground));
-  width: 3.5rem;
 }
 
 .relation-file .ok {
@@ -1709,9 +1732,9 @@ onMounted(() => {
   padding: 0 0.25rem;
   font-size: 0.75rem;
   color: hsl(var(--primary));
+  word-break: break-all;
   background-color: hsl(var(--primary) / 10%);
   border-radius: 0.25rem;
-  word-break: break-all;
 }
 
 .relation-pagination {
