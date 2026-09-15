@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import { ref } from 'vue';
+
 import { IconifyIcon } from '@vben/icons';
 
 import { NEmpty } from 'naive-ui';
@@ -16,6 +18,13 @@ interface Props {
 }
 
 defineProps<Props>();
+
+/** 加载失败的条目 id：用于回退到占位图，而不是把破图隐藏后留一片空白 */
+const failedIds = ref(new Set<number | string>());
+
+function onImgError(id: number | string) {
+  failedIds.value.add(id);
+}
 
 function openLink(link?: string) {
   if (link) window.open(link, '_blank', 'noopener');
@@ -35,12 +44,12 @@ function openLink(link?: string) {
     >
       <div class="latest-poster">
         <img
-          v-if="item.image"
+          v-if="item.image && !failedIds.has(item.id)"
           :src="item.image"
           :alt="item.name"
           class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           loading="lazy"
-          @error="($event.target as HTMLImageElement).style.display = 'none'"
+          @error="onImgError(item.id)"
         />
         <div
           v-else
