@@ -3,7 +3,15 @@ import type { FilterApi } from '#/api/modules/filter';
 
 import { ref, watch } from 'vue';
 
-import { NButton, NForm, NFormItem, NInput, NModal, NSelect, NSpace } from 'naive-ui';
+import {
+  NButton,
+  NForm,
+  NFormItem,
+  NInput,
+  NModal,
+  NSelect,
+  NSpace,
+} from 'naive-ui';
 
 import { addFilterRuleApi } from '#/api/modules/filter';
 import { ORIGINAL_LANGUAGE_OPTIONS } from '#/constants/filterOptions';

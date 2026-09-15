@@ -63,7 +63,7 @@ const selectedIds = ref<number[]>([]);
 
 // 作品级跨盘迁移
 const migrateModalShow = ref(false);
-const migrateTmdbId = ref<undefined | number>(undefined);
+const migrateTmdbId = ref<number | undefined>(undefined);
 
 // manual identify modal
 const manualModalShow = ref(false);
@@ -198,7 +198,8 @@ function getItemOptions(_item: any) {
     {
       label: '迁移到其他盘',
       key: 'migrate',
-      icon: () => h(IconifyIcon, { icon: 'lucide:hard-drive', class: 'size-4' }),
+      icon: () =>
+        h(IconifyIcon, { icon: 'lucide:hard-drive', class: 'size-4' }),
     },
     { type: 'divider', key: 'd1' },
     {

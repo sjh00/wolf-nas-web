@@ -1,8 +1,9 @@
+import type { DownloadApi } from '#/api/modules/download';
+
 import { h, ref, shallowRef } from 'vue';
 
 import { NButton, NCheckbox, NText, useDialog } from 'naive-ui';
 
-import type { DownloadApi } from '#/api/modules/download';
 import { cleanupFileChainApi } from '#/api/modules/media';
 
 /**
@@ -20,12 +21,14 @@ export function useMultiVersionDownload() {
   const dialog = useDialog();
   const loading = ref(false);
 
-  type SubmitFn = (strategy?: string) => Promise<DownloadApi.MultiVersionConfirm>;
+  type SubmitFn = (
+    strategy?: string,
+  ) => Promise<DownloadApi.MultiVersionConfirm>;
   type VersionItem = DownloadApi.MultiVersionConfirm['versions'][number];
 
   // 当前确认弹窗的上下文
   const _confirm = shallowRef<DownloadApi.MultiVersionConfirm | null>(null);
-  const _submitFn = shallowRef<SubmitFn | null>(null);
+  const _submitFn = shallowRef<null | SubmitFn>(null);
   const _selected = ref<Set<string>>(new Set());
 
   // 同一作品的版本可能对应同一 full_path；用 full_path 作为唯一标识
@@ -34,7 +37,8 @@ export function useMultiVersionDownload() {
   }
 
   function extractConfirm(res: any): DownloadApi.MultiVersionConfirm | null {
-    const candidate: any = res && res.need_confirm !== undefined ? res : res?.data;
+    const candidate: any =
+      res && res.need_confirm !== undefined ? res : res?.data;
     if (!candidate || !candidate.need_confirm) return null;
     return candidate as DownloadApi.MultiVersionConfirm;
   }
@@ -66,11 +70,7 @@ export function useMultiVersionDownload() {
               else _selected.value.delete(key);
             },
           }),
-          h(
-            NText,
-            { depth: 2 },
-            { default: () => versionLabel(v) },
-          ),
+          h(NText, { depth: 2 }, { default: () => versionLabel(v) }),
         ],
       );
     });
@@ -125,10 +125,10 @@ export function useMultiVersionDownload() {
   }
 
   /** 第二级：源文件处理方式 */
-  function openSourcePolicyDialog(): Promise<'keep' | 'remove' | 'cancel'> {
+  function openSourcePolicyDialog(): Promise<'cancel' | 'keep' | 'remove'> {
     return new Promise((resolve) => {
       let resolved = false;
-      const finish = (val: 'keep' | 'remove' | 'cancel') => {
+      const finish = (val: 'cancel' | 'keep' | 'remove') => {
         if (resolved) return;
         resolved = true;
         d.destroy();
@@ -139,31 +139,41 @@ export function useMultiVersionDownload() {
         content: '替换时将清理媒体库文件。做种源文件如何处理？',
         maskClosable: false,
         action: () =>
-          h('div', { style: 'display:flex;gap:8px;justify-content:flex-end;' }, [
-            h(
-              NButton,
-              {
-                type: 'primary',
-                onClick: () => finish('keep'),
-              },
-              { default: () => '只删媒体库（不动源）' },
-            ),
-            h(
-              NButton,
-              {
-                onClick: () => finish('remove'),
-              },
-              { default: () => '同时清理源+做种任务' },
-            ),
-            h(NButton, { onClick: () => finish('cancel') }, { default: () => '取消' }),
-          ]),
+          h(
+            'div',
+            { style: 'display:flex;gap:8px;justify-content:flex-end;' },
+            [
+              h(
+                NButton,
+                {
+                  type: 'primary',
+                  onClick: () => finish('keep'),
+                },
+                { default: () => '只删媒体库（不动源）' },
+              ),
+              h(
+                NButton,
+                {
+                  onClick: () => finish('remove'),
+                },
+                { default: () => '同时清理源+做种任务' },
+              ),
+              h(
+                NButton,
+                { onClick: () => finish('cancel') },
+                { default: () => '取消' },
+              ),
+            ],
+          ),
         onClose: () => finish('cancel'),
       });
     });
   }
 
   /** 第一级：版本多选对话框 */
-  function openSelectDialog(confirm: DownloadApi.MultiVersionConfirm): Promise<string> {
+  function openSelectDialog(
+    confirm: DownloadApi.MultiVersionConfirm,
+  ): Promise<string> {
     return new Promise((resolve) => {
       let resolved = false;
       const finish = (strategy: string) => {
@@ -174,31 +184,44 @@ export function useMultiVersionDownload() {
       };
       const d = dialog.warning({
         title: '检测到多个已入库版本',
-        content: () => h('div', [
-          h('div', { style: 'margin-bottom:8px;' }, '请选择要替换的版本（可多选）：'),
-          ...renderVersionList(confirm.versions || []),
-        ]),
+        content: () =>
+          h('div', [
+            h(
+              'div',
+              { style: 'margin-bottom:8px;' },
+              '请选择要替换的版本（可多选）：',
+            ),
+            ...renderVersionList(confirm.versions || []),
+          ]),
         maskClosable: false,
         action: () =>
-          h('div', { style: 'display:flex;gap:8px;justify-content:flex-end;' }, [
-            h(
-              NButton,
-              {
-                type: 'primary',
-                disabled: _selected.value.size === 0,
-                onClick: () => finish('overwrite'),
-              },
-              { default: () => '替换所选版本' },
-            ),
-            h(
-              NButton,
-              {
-                onClick: () => finish('duplicate'),
-              },
-              { default: () => '共存' },
-            ),
-            h(NButton, { onClick: () => finish('cancel') }, { default: () => '取消' }),
-          ]),
+          h(
+            'div',
+            { style: 'display:flex;gap:8px;justify-content:flex-end;' },
+            [
+              h(
+                NButton,
+                {
+                  type: 'primary',
+                  disabled: _selected.value.size === 0,
+                  onClick: () => finish('overwrite'),
+                },
+                { default: () => '替换所选版本' },
+              ),
+              h(
+                NButton,
+                {
+                  onClick: () => finish('duplicate'),
+                },
+                { default: () => '共存' },
+              ),
+              h(
+                NButton,
+                { onClick: () => finish('cancel') },
+                { default: () => '取消' },
+              ),
+            ],
+          ),
         onClose: () => finish('cancel'),
       });
     });
