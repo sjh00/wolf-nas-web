@@ -1,5 +1,9 @@
 # WolfNas Web
 
+[![CI](https://github.com/sjh00/wolf-nas-web/actions/workflows/ci.yml/badge.svg)](https://github.com/sjh00/wolf-nas-web/actions/workflows/ci.yml)
+
+[中文](./README.zh-CN.md) | **English** | [日本語](./README.ja-JP.md)
+
 WolfNas 前端项目，基于 [Vben Admin](https://github.com/vbenjs/vue-vben-admin) 构建。
 
 ## 技术栈

@@ -1,27 +1,24 @@
 {
-  "name": "vben-admin-monorepo",
+  "name": "wolf-nas-web",
   "version": "5.7.0",
   "private": true,
   "keywords": [
     "monorepo",
     "turbo",
-    "vben",
-    "vben admin",
-    "vben pro",
+    "nas",
+    "media",
+    "wolfnas",
     "vue",
     "vue admin",
-    "vue vben admin",
-    "vue vben admin pro",
     "vue3"
   ],
-  "homepage": "https://github.com/vbenjs/vue-vben-admin",
-  "bugs": "https://github.com/vbenjs/vue-vben-admin/issues",
-  "repository": "vbenjs/vue-vben-admin.git",
+  "homepage": "https://github.com/sjh00/wolf-nas-web",
+  "bugs": "https://github.com/sjh00/wolf-nas-web/issues",
+  "repository": "sjh00/wolf-nas-web.git",
   "license": "MIT",
   "author": {
-    "name": "vben",
-    "email": "ann.vben@gmail.com",
-    "url": "https://github.com/anncwb"
+    "name": "sjh00",
+    "url": "https://github.com/sjh00"
   },
   "type": "module",
   "scripts": {

@@ -1,6 +1,6 @@
-# Vben Admin Contributing Guide
+# WolfNas Web Contributing Guide
 
-Hi! We're really excited that you are interested in contributing to Vben Admin. Before submitting your contribution, please make sure to take a moment and read through the following guidelines:
+Hi! We're really excited that you are interested in contributing to WolfNas Web. Before submitting your contribution, please make sure to take a moment and read through the following guidelines:
 
 - [Pull Request Guidelines](#pull-request-guidelines)
 
@@ -35,6 +35,6 @@ After cloning the repo, run:
 ```bash
 # install the dependencies of the project
 $ pnpm install
-# start the project
-$ pnpm run dev
+# start the frontend app
+$ pnpm dev:nexus
 ```

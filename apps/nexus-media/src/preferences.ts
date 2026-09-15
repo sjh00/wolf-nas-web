@@ -10,6 +10,7 @@ export const overridesPreferences = defineOverridesPreferences({
   app: {
     name: import.meta.env.VITE_APP_TITLE,
     accessMode: 'mixed',
+    defaultAvatar: '/static/img/person.png',
     defaultHomePath: '/dashboard/home',
     enableRefreshToken: true,
     preferencesButtonPosition: 'user-dropdown',
