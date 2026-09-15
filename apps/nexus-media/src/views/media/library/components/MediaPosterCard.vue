@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import { ref } from 'vue';
+
 import { IconifyIcon } from '@vben/icons';
 
 interface Props {
@@ -17,6 +19,16 @@ withDefaults(defineProps<Props>(), {
   type: '',
   typeLabel: '',
 });
+
+/**
+ * 记录加载失败的图片地址（而不是失败标记），这样 image 变化时会自动重试：
+ * 旧地址留在 failedSrc 里，与新地址不相等即重新渲染 img。
+ */
+const failedSrc = ref('');
+
+function onImgError(src?: string) {
+  failedSrc.value = src || '';
+}
 
 function replaceLocalhost(url?: string) {
   if (!url) return '';
@@ -45,14 +57,14 @@ function replaceLocalhost(url?: string) {
   >
     <div class="relative aspect-[2/3] overflow-hidden">
       <img
-        v-if="image"
+        v-if="image && failedSrc !== image"
         :src="image"
         class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
         :alt="title"
-        @error="($event.target as HTMLImageElement).style.display = 'none'"
+        @error="onImgError(image)"
       />
       <div
-        v-if="!image"
+        v-else
         class="flex h-full w-full flex-col items-center justify-center gap-2"
         style="background: hsl(var(--muted))"
       >
