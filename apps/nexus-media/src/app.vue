@@ -13,6 +13,7 @@ import {
   enUS,
   lightTheme,
   NConfigProvider,
+  NDialogProvider,
   NMessageProvider,
   NNotificationProvider,
   zhCN,
@@ -50,7 +51,13 @@ const themeOverrides = computed((): GlobalThemeOverrides => {
   >
     <NNotificationProvider>
       <NMessageProvider>
-        <RouterView />
+        <!-- NDialogProvider 必须存在：useDialog() 在调用时即校验外层 provider，
+             缺失会抛 "No outer <n-dialog-provider /> founded."，使在 setup 中调用
+             useMultiVersionDownload() 的页面（正在下载、媒体搜索、站点资源）
+             整体挂载失败、页面空白 -->
+        <NDialogProvider>
+          <RouterView />
+        </NDialogProvider>
       </NMessageProvider>
     </NNotificationProvider>
   </NConfigProvider>
