@@ -2,6 +2,8 @@
  * 仪表盘聚合 API
  * 整合媒体库、站点、刷流、下载、调度、入库统计等数据
  */
+import type { SiteApi } from '#/api/modules/site';
+
 import { requestClient } from '#/api/request';
 
 export namespace DashboardApi {
@@ -28,16 +30,15 @@ export namespace DashboardApi {
     latests: any[];
   }
 
-  export interface SiteStatisticsItem {
-    name: string;
-    upload: number;
-    download: number;
-    ratio: number;
-    seeding_size: number;
-    seeding_count: number;
-    bonus: number;
-    username: string;
-  }
+  /**
+   * 站点统计项。
+   *
+   * 直接复用 SiteApi.SiteStatisticsItem：与 /site/sites/statistics 是同一接口，
+   * 此前在本文件重复声明且把 upload/download/ratio/seeding_size/bonus 写成了
+   * number，而后端实际返回格式化字符串（"1.23 GB" / "100.50"），
+   * 按该类型做数值运算会得到 NaN。
+   */
+  export type SiteStatisticsItem = SiteApi.SiteStatisticsItem;
 
   export interface IndexerStatistics {
     stats: Array<{
