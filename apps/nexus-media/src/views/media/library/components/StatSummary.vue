@@ -51,6 +51,11 @@ function getCount(key: string) {
   }
   return 0;
 }
+
+/** 展示用：加千分位（数据本身保持原始数字，格式化只发生在展示层） */
+function displayCount(key: string) {
+  return getCount(key).toLocaleString();
+}
 </script>
 
 <template>
@@ -76,7 +81,7 @@ function getCount(key: string) {
           class="text-xl font-bold leading-tight"
           style="color: hsl(var(--card-foreground))"
         >
-          {{ getCount(item.key) }}
+          {{ displayCount(item.key) }}
         </div>
         <div class="text-xs" style="color: hsl(var(--muted-foreground))">
           {{ item.label }}
