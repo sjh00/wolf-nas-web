@@ -1,12 +1,11 @@
 name: CI
 
 on:
+  # 推送到 main 时由 docker.yml 通过 workflow_call 复用本工作流（同一提交只跑一遍 CI）；
+  # 这里只负责 PR 检查。workflow_call 是 docker.yml 的 `uses:` 所依赖的入口，勿删。
   pull_request:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
