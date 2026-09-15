@@ -132,22 +132,33 @@ const downloadTrend = computed(() => {
 });
 
 // 计算属性
+// 后端契约是 number | string；字符串可能带千分位（"1,234"），
+// 直接 Number() 会得到 NaN 并导致计数显示为 0，这里统一剥掉千分位再解析
+function toCount(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const num = Number.parseInt(value.replaceAll(',', ''), 10);
+    return Number.isFinite(num) ? num : 0;
+  }
+  return 0;
+}
+
 const mediaCount = computed(() => {
   const c = libraryData.value?.media_counts || {};
   return {
-    movie: Number(c.Movie) || 0,
-    series: Number(c.Series) || 0,
-    episode: Number(c.Episodes) || 0,
-    song: Number(c.Music) || 0,
+    movie: toCount(c.Movie),
+    series: toCount(c.Series),
+    episode: toCount(c.Episodes),
+    song: toCount(c.Music),
   };
 });
 
 const mediaPieData = computed(() => {
   const c = libraryData.value?.media_counts || {};
   return [
-    { name: '电影', value: Number(c.Movie) || 0 },
-    { name: '电视剧', value: Number(c.Series) || 0 },
-    { name: '音乐', value: Number(c.Music) || 0 },
+    { name: '电影', value: toCount(c.Movie) },
+    { name: '电视剧', value: toCount(c.Series) },
+    { name: '音乐', value: toCount(c.Music) },
   ].filter((i) => i.value > 0);
 });
 
