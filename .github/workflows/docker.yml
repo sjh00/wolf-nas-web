@@ -13,9 +13,13 @@ permissions:
   packages: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   build:
     runs-on: ubuntu-latest
     name: Build Docker Image
+    needs: ci
     env:
       DOCKERHUB_USER: ${{ secrets.DOCKER_USERNAME }}
       DOCKERHUB_PWD: ${{ secrets.DOCKER_PASSWORD }}
