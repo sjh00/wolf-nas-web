@@ -6,9 +6,11 @@ export function useSiteStats() {
   function parseSize(sizeInput: number | string): number {
     if (sizeInput == null) return 0;
     if (typeof sizeInput === 'number') return sizeInput;
-    const match = String(sizeInput).match(
-      /^(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)/i,
-    );
+    // 先剥掉千分位：后端尺寸字符串存在两种格式（"1.23 GB" 与 "1,234.56 GB"），
+    // 带逗号时下标正则不匹配会静默返回 0（表现为上传/下载量显示为 0）
+    const match = String(sizeInput)
+      .replaceAll(',', '')
+      .match(/^(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)/i);
     if (!match) return 0;
     const val = Number.parseFloat(match[1]!);
     const unit = match[2]!.toUpperCase();
