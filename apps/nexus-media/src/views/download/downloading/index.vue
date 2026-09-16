@@ -33,6 +33,7 @@ import {
   getDownloadTasksApi,
   pauseTaskApi,
   resumeTaskApi,
+  uploadTorrentFileApi,
 } from '#/api';
 import EmptyState from '#/components/empty/EmptyState.vue';
 import { useDownloadEventStream } from '#/composables/useDownloadEventStream';
@@ -64,7 +65,7 @@ const selectedDir = ref('');
 const selectedSetting = ref('');
 const addLoading = ref(false);
 const { start: startSSE, stop: stopSSE } = useDownloadEventStream(() =>
-  fetchTasks(currentPage.value),
+  fetchTasks(currentPage.value, true),
 );
 
 // 下载器颜色映射（基于 client_id）
@@ -285,14 +286,29 @@ const downloaderStats = computed(() => {
   return stats;
 });
 
-async function fetchTasks(page?: number) {
-  loading.value = true;
+function applyTaskList(list: any[]) {
+  const prev = torrents.value;
+  if (prev.length === 0) {
+    torrents.value = list;
+    return;
+  }
+  const prevMap = new Map(prev.map((t) => [t.id, t]));
+  torrents.value = list.map((item) => {
+    const old = prevMap.get(item.id);
+    if (!old) return item;
+    Object.assign(old, item);
+    return old;
+  });
+}
+
+async function fetchTasks(page?: number, silent = false) {
+  if (!silent) loading.value = true;
   try {
     const p = page || currentPage.value;
     const res = (await getDownloadTasksApi(p, pageSize.value)) as any;
     const data = res?.data || res || {};
     const list = Array.isArray(data) ? data : data.items || [];
-    torrents.value = list;
+    applyTaskList(list);
     if (data.total !== undefined) totalCount.value = data.total;
     currentPage.value = p;
     downloadStore.setTasks(
@@ -303,7 +319,7 @@ async function fetchTasks(page?: number) {
       })),
     );
   } finally {
-    loading.value = false;
+    if (!silent) loading.value = false;
   }
 }
 
@@ -333,7 +349,7 @@ async function handleConfirmDelete() {
 
 function startAutoRefresh() {
   refreshTimer.value = window.setInterval(() => {
-    fetchTasks(currentPage.value);
+    void fetchTasks(currentPage.value, true);
   }, 5000);
 }
 
@@ -399,17 +415,31 @@ async function handleAddDownload() {
             .map((u) => u.trim())
             .filter(Boolean)
         : [];
-    const files =
-      addType.value === 'torrent'
-        ? fileList.value.map((f) => f.file?.name).filter(Boolean)
-        : [];
+    const files: string[] = [];
+    if (addType.value === 'torrent') {
+      for (const item of fileList.value) {
+        const raw = item.file;
+        if (!(raw instanceof File)) continue;
+        const uploaded = (await uploadTorrentFileApi(raw)) as any;
+        const saved = uploaded?.filename || uploaded?.data?.filename;
+        if (saved) files.push(saved);
+      }
+      if (files.length === 0) {
+        message.error('种子文件上传失败');
+        return;
+      }
+    }
 
     const done = await multiVersionDownload.submit(
       (strategy?: string) =>
         addTorrentApi({
           confirm_strategy: strategy,
           urls,
-          files: files as string[],
+          files,
+          title:
+            addType.value === 'url'
+              ? urls[0]
+              : fileList.value[0]?.name || files[0],
           dl_dir: selectedDir.value || undefined,
           dl_setting: selectedSetting.value || undefined,
         }),
@@ -963,7 +993,12 @@ onUnmounted(() => {
         <NTabPane name="torrent" tab="种子文件">
           <NForm label-placement="top">
             <NFormItem label="种子文件" required>
-              <NUpload v-model:file-list="fileList" :max="5" accept=".torrent">
+              <NUpload
+                v-model:file-list="fileList"
+                :max="5"
+                accept=".torrent"
+                :default-upload="false"
+              >
                 <NButton>
                   <template #icon>
                     <IconifyIcon icon="lucide:upload" class="size-4" />
