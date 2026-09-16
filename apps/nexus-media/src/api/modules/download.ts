@@ -377,6 +377,15 @@ export async function resolveDownloadUrlApi(params: {
   );
 }
 
+/** 上传种子文件到后端临时目录 */
+export async function uploadTorrentFileApi(file: File) {
+  return requestClient.upload<{ filename: string; original_name: string }>(
+    '/download/tasks/upload_torrent',
+    { file },
+    { timeout: 60_000 },
+  );
+}
+
 /** 添加种子下载任务 */
 export async function addTorrentApi(params: {
   confirm_strategy?: string;
