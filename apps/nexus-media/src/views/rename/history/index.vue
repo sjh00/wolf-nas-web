@@ -54,8 +54,9 @@ const totalPage = ref(1);
 const clearModalShow = ref(false);
 const deleteModalShow = ref(false);
 const posterFailed = ref<number[]>([]);
+type DeleteHistoryFlag = '' | 'del_all' | 'del_dest' | 'del_source';
 const deletePayload = ref<null | {
-  flag: string;
+  flag: DeleteHistoryFlag;
   label: string;
   logids: number[];
 }>(null);
@@ -256,6 +257,12 @@ function getBulkOptions() {
   ];
 }
 
+function toDeleteFlag(key: string): DeleteHistoryFlag {
+  if (key === 'del_source' || key === 'del_dest' || key === 'del_all')
+    return key;
+  return '';
+}
+
 function handleItemAction(key: string, item: any) {
   if (key === 'reidentify') {
     doReIdentify([item.ID]);
@@ -277,7 +284,7 @@ function handleItemAction(key: string, item: any) {
     };
     deletePayload.value = {
       logids: [item.ID],
-      flag: key === 'del_log' ? '' : key,
+      flag: toDeleteFlag(key),
       label: labels[key] ?? '',
     };
     deleteModalShow.value = true;
@@ -297,7 +304,7 @@ function handleBulkAction(key: string) {
   };
   deletePayload.value = {
     logids: [...selectedIds.value],
-    flag: key === 'del_log' ? '' : key,
+    flag: toDeleteFlag(key),
     label: labels[key] ?? '',
   };
   deleteModalShow.value = true;
@@ -316,23 +323,31 @@ async function doReIdentify(ids: number[]) {
 
 async function confirmDelete() {
   if (!deletePayload.value) return;
+  const payload = {
+    logids: [...deletePayload.value.logids],
+    flag: deletePayload.value.flag,
+    label: deletePayload.value.label,
+  };
+  const removedIds = new Set(payload.logids);
+  const previous = mediaStore.transferHistory;
+  mediaStore.setTransferHistory(
+    previous.filter((item) => !removedIds.has(item.ID)),
+  );
+  selectedIds.value = selectedIds.value.filter((id) => !removedIds.has(id));
+  deleteModalShow.value = false;
+  deletePayload.value = null;
   try {
-    const payload: any = { logids: deletePayload.value.logids };
-    if (deletePayload.value.flag) {
-      payload.flag = deletePayload.value.flag;
-    }
-    await deleteTransferHistoryApi(payload);
-    notification.success(`${deletePayload.value.label} 成功`);
-    selectedIds.value = selectedIds.value.filter(
-      (id) => !deletePayload.value!.logids.includes(id),
-    );
+    const body: { flag?: DeleteHistoryFlag; logids: number[] } = {
+      logids: payload.logids,
+    };
+    if (payload.flag) body.flag = payload.flag;
+    await deleteTransferHistoryApi(body);
+    notification.success(`${payload.label} 成功`);
     await fetchData(currentPage.value);
     await fetchStatistics();
   } catch (error: any) {
+    mediaStore.setTransferHistory(previous);
     notification.error('删除失败', { description: error?.message || '' });
-  } finally {
-    deleteModalShow.value = false;
-    deletePayload.value = null;
   }
 }
 
