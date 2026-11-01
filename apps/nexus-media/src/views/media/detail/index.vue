@@ -9,6 +9,7 @@ import { NButton, NSpin, useMessage } from 'naive-ui';
 
 import {
   getMediaDetailApi,
+  getMediaDetailByRefApi,
   getRecommendationsApi,
   getSimilarApi,
   webSearchApi,
@@ -41,7 +42,22 @@ const similar = ref<any[]>([]);
 const recommends = ref<any[]>([]);
 const fav = ref<string>('0');
 
-const mediaId = computed(() => String(route.query.id || ''));
+const detailProvider = computed(() => String(route.query.provider || ''));
+const detailExternalId = computed(() =>
+  String(route.query.ref || route.query.external_id || ''),
+);
+const detailProfile = computed(() => String(route.query.profile || ''));
+const isExternalDetail = computed(
+  () => !!detailProvider.value && detailProvider.value !== 'tmdb',
+);
+const mediaId = computed(() =>
+  String(
+    isExternalDetail.value ? detailExternalId.value : route.query.id || '',
+  ),
+);
+const subscribeMediaId = computed(() =>
+  String(detail.value.mediaid || mediaId.value),
+);
 const mediaType = computed(() => {
   const t = String(route.query.type || 'movie');
   if (t.toLowerCase() === 'movie') return 'movie';
@@ -49,6 +65,8 @@ const mediaType = computed(() => {
   return t;
 });
 const isTv = computed(() => mediaType.value !== 'movie');
+// TMDB 没有动漫类型：动漫/电视剧都走 tv 接口
+const tmdbType = computed(() => (mediaType.value === 'movie' ? 'movie' : 'tv'));
 
 async function loadDetail() {
   if (!mediaId.value) {
@@ -57,7 +75,15 @@ async function loadDetail() {
   }
   loading.value = true;
   try {
-    const res: any = await getMediaDetailApi(mediaId.value, mediaType.value);
+    const res: any = isExternalDetail.value
+      ? await getMediaDetailByRefApi(
+          detailProvider.value,
+          detailExternalId.value,
+          mediaType.value,
+          detailProfile.value,
+          String(route.query.id || ''),
+        )
+      : await getMediaDetailApi(mediaId.value, tmdbType.value);
     if (res && typeof res === 'object' && res.title) {
       detail.value = res;
       fav.value = String(res.fav || '0');
@@ -65,8 +91,16 @@ async function loadDetail() {
       subSeasons.value = Array.isArray(res.sub_seasons)
         ? res.sub_seasons.map(Number)
         : [];
+      if (
+        isExternalDetail.value &&
+        Array.isArray(detail.value.similar) &&
+        detail.value.similar.length > 0
+      ) {
+        similar.value = detail.value.similar;
+      }
       if (detail.value.tmdbid) {
-        loadSimilar();
+        if (!isExternalDetail.value || similar.value.length === 0)
+          loadSimilar();
         loadRecommends();
       }
     } else {
@@ -81,11 +115,19 @@ async function loadDetail() {
 }
 
 async function loadSimilar() {
+  if (
+    isExternalDetail.value &&
+    Array.isArray(detail.value.similar) &&
+    detail.value.similar.length > 0
+  ) {
+    similar.value = detail.value.similar;
+    return;
+  }
   const tid = detail.value.tmdbid;
   if (!tid) return;
   try {
     const res: any = await getSimilarApi({
-      type: mediaType.value,
+      type: tmdbType.value,
       tmdbid: String(tid),
       page: 1,
     });
@@ -100,7 +142,7 @@ async function loadRecommends() {
   if (!tid) return;
   try {
     const res: any = await getRecommendationsApi({
-      type: mediaType.value,
+      type: tmdbType.value,
       tmdbid: String(tid),
       page: 1,
     });
@@ -121,7 +163,7 @@ async function handleSearch() {
     const resp: any = await webSearchApi({
       search_word: detail.value.title,
       tmdbid: mediaId.value,
-      media_type: mediaType.value,
+      media_type: tmdbType.value,
     });
     sessionId = resp?.session_id || '';
   } catch {}
@@ -147,13 +189,16 @@ async function handleSubscribe() {
   // 电视剧：始终打开季选择框（未订阅=订阅，已订阅=追加其他季）
   if (isTv.value) {
     subscribeConfirmItem.value = {
-      id: mediaId.value,
-      tmdbid: mediaId.value,
+      id: subscribeMediaId.value,
+      tmdbid: subscribeMediaId.value,
       title: detail.value.title,
       year: detail.value.year || '',
       type: 'tv',
       image: detail.value.image || detail.value.poster,
       overview: detail.value.overview,
+      content_profile: (detail.value as any).content_profile,
+      metadata_ref: (detail.value as any).metadata_ref,
+      provider: (detail.value as any).provider,
     };
     subscribeConfirmShow.value = true;
     return;
@@ -166,6 +211,7 @@ async function handleSubscribe() {
         type: mediaType.value,
         rssid: detail.value.rssid,
         tmdbid: mediaId.value,
+        content_profile: (detail.value as any).content_profile,
       });
       fav.value = '0';
       message.success('已删除订阅');
@@ -174,7 +220,10 @@ async function handleSubscribe() {
         name: detail.value.title,
         year: detail.value.year || '',
         type: mediaType.value,
-        mediaid: mediaId.value,
+        mediaid: subscribeMediaId.value,
+        content_profile: (detail.value as any).content_profile,
+        metadata_ref: (detail.value as any).metadata_ref,
+        provider: (detail.value as any).provider,
       });
       fav.value = '1';
       message.success('已添加订阅');
@@ -198,8 +247,11 @@ async function handleConfirmSubscribe(payload: {
         name: detail.value.title,
         year: detail.value.year || '',
         type: 'tv',
-        mediaid: mediaId.value,
+        mediaid: subscribeMediaId.value,
         season: String(season),
+        content_profile: (detail.value as any).content_profile,
+        metadata_ref: (detail.value as any).metadata_ref,
+        provider: (detail.value as any).provider,
       });
     }
     for (const season of remove) {
@@ -207,8 +259,9 @@ async function handleConfirmSubscribe(payload: {
         name: detail.value.title,
         year: detail.value.year || '',
         type: 'tv',
-        tmdbid: mediaId.value,
+        tmdbid: subscribeMediaId.value,
         season: String(season),
+        content_profile: (detail.value as any).content_profile,
       });
     }
     fav.value = selected.length > 0 ? '1' : '0';
@@ -230,7 +283,10 @@ async function handleEditSubscribe() {
   const mtype = it.type === 'movie' ? 'movie' : 'tv';
   let defaults: any = {};
   try {
-    const res: any = await getDefaultSubscriptionSettingApi(mtype);
+    const res: any = await getDefaultSubscriptionSettingApi(
+      mtype,
+      it.content_profile,
+    );
     defaults = res?.data || res || {};
   } catch {
     // ignore
@@ -241,6 +297,9 @@ async function handleEditSubscribe() {
     type: mtype,
     tmdbid: String(it.tmdbid || it.id || ''),
     image: it.image,
+    content_profile: it.content_profile,
+    metadata_ref: it.metadata_ref,
+    mediaid: it.mediaid,
     season: '',
     fuzzy_match: false,
     over_edition: !!(
@@ -271,7 +330,9 @@ async function handleEditSubscribe() {
 
 async function handleConfirmEdit(data: Record<string, any>) {
   try {
-    await addSubscriptionApi(data);
+    const isCustom =
+      !!data.content_profile && data.content_profile !== 'default';
+    await (isCustom ? addSubscriptionMediaApi(data) : addSubscriptionApi(data));
     fav.value = '1';
     if (data.season) {
       const s = Number(data.season);
@@ -304,11 +365,19 @@ onMounted(() => {
   loadDetail();
 });
 
-watch([() => route.query.id, () => route.query.type], () => {
-  loadDetail();
-  loadSimilar();
-  loadRecommends();
-});
+watch(
+  [
+    () => route.query.id,
+    () => route.query.type,
+    () => route.query.provider,
+    () => route.query.ref,
+  ],
+  () => {
+    loadDetail();
+    loadSimilar();
+    loadRecommends();
+  },
+);
 </script>
 
 <template>
@@ -330,7 +399,11 @@ watch([() => route.query.id, () => route.query.type], () => {
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
           <div class="space-y-6 lg:col-span-3">
             <CastList
-              v-if="detail.crews && detail.crews.length > 0"
+              v-if="
+                (detail.actor_profiles && detail.actor_profiles.length > 0) ||
+                (detail.crews && detail.crews.length > 0)
+              "
+              :actors="detail.actor_profiles"
               :crews="detail.crews"
             />
 

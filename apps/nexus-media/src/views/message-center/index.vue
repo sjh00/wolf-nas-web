@@ -1,45 +1,70 @@
 <script lang="ts" setup>
 import type { AgentApi } from '#/api/modules/agent';
 
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import {
+  computed,
+  h,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
+import { useRoute } from 'vue-router';
 
 import { IconifyIcon } from '@vben/icons';
 
 import {
   NButton,
+  NDrawer,
   NEmpty,
   NInput,
   NModal,
   NPopconfirm,
+  NPopover,
   NSelect,
   NSpin,
-  NTag,
+  NSwitch,
   NTooltip,
+  useMessage,
 } from 'naive-ui';
 
 import {
+  cancelAgentChat,
   clearAgentChat,
   confirmAgentChat,
+  createAgentSession,
   deleteAgentMemory,
+  deleteAgentSession,
   getAgentKbStatus,
   getAgentMemories,
+  getAgentSessions,
+  getAgentStatus,
   getConversation,
   getMessageHistory,
   getMessageUnreadCount,
   interactMessage,
   markMessageRead,
+  rejectAgentChat,
+  renameAgentSession,
   streamAgentChat,
   streamMessages,
+  uploadAgentAttachment,
 } from '#/api/modules/agent';
-import { getAllSystemConfigApi } from '#/api/modules/system';
 import { canOsNotify, queueOsNotify } from '#/utils/os-notify';
-import { dispatchUnreadSync } from '#/utils/unread-sync';
+import {
+  dispatchUnreadSync,
+  listenScrollFirstUnread,
+} from '#/utils/unread-sync';
 
 import ChatMessage from './components/ChatMessage.vue';
 import ConfirmCard from './components/ConfirmCard.vue';
+import SessionSidebar from './components/SessionSidebar.vue';
 import WelcomePanel from './components/WelcomePanel.vue';
 
 interface Message {
+  attachments?: AgentApi.ChatAttachment[];
   id: number;
   /** 后端消息 ID（已读标记用；用户/助手消息无此字段） */
   backendId?: number;
@@ -49,6 +74,7 @@ interface Message {
   items?: AgentApi.ListItem[];
   reasoning?: string;
   url?: string;
+  usage?: number;
   toolEvents?: AgentApi.ChatEvent[];
   streaming?: boolean;
   /** 是否已读（来自后端 read 字段） */
@@ -59,13 +85,40 @@ interface Message {
   _sort?: number;
 }
 
+const message = useMessage();
+const route = useRoute();
 const messages = ref<Message[]>([]);
 const input = ref('');
 const sending = ref(false);
 const agentEnabled = ref(false);
 const providerName = ref('');
+const modelName = ref('');
+const attachments = ref<
+  { image_data?: string; media_type?: string; name: string; text: string }[]
+>([]);
+const attachmentInput = ref<HTMLInputElement | null>(null);
+const sessionTokens = computed(() => {
+  const live = visibleMessages.value.reduce(
+    (sum, item) => sum + (item.usage || 0),
+    0,
+  );
+  const persisted =
+    sessions.value.find((item) => item.session_id === currentSessionId.value)
+      ?.token_usage || 0;
+  return Math.max(live, persisted);
+});
 const kbTotal = ref(0);
 const unreadCount = ref(0);
+const activeTab = ref<'chat' | 'notifications'>('chat');
+const currentSessionId = ref('');
+const sessions = ref<any[]>([]);
+const sessionsLoading = ref(false);
+const sessionDrawer = ref(false);
+const visibleMessages = computed(() =>
+  activeTab.value === 'chat'
+    ? messages.value.filter((msg) => msg.role !== 'system')
+    : messages.value.filter((msg) => msg.role === 'system'),
+);
 
 /** 推理强度与思考模式（按次覆盖，初始值跟随 Agent 全局配置） */
 const MAX_EFFORT_TIP =
@@ -99,10 +152,12 @@ function renderReasoningLabel(option: Record<string, any>) {
 }
 const listRef = ref<HTMLDivElement | null>(null);
 const chatAbort = ref<AbortController | null>(null);
+const currentTurnId = ref('');
 const streamAbort = ref<AbortController | null>(null);
 const confirmState = ref<null | {
   arguments: Record<string, any>;
   message: string;
+  pending_action_id: string;
   tool: string;
 }>(null);
 const confirmBusy = ref(false);
@@ -112,9 +167,14 @@ let streamCursor = 0;
 let streamBackoff = 3000;
 let ioObserver: IntersectionObserver | null = null;
 const readTimers = new Map<number, ReturnType<typeof setTimeout>>();
+// 已读批量合并：视口内多条消息的已读请求去抖为一次提交，避免同秒并发打爆后端
+const pendingReadIds = new Set<number>();
+let pendingReadTimer: null | number = null;
+const READ_BATCH_DELAY = 400;
 const msgElements = new Map<number, HTMLElement>();
 let streamReconnectTimer: null | number = null;
 let placeholderId: null | number = null;
+let unlistenScrollFirstUnread: (() => void) | null = null;
 
 const STREAM_CURSOR_KEY = 'nexus-agent-stream-cursor';
 const NOTIFIED_KEY = 'nexus-agent-notified-ids';
@@ -137,7 +197,26 @@ function maybeNotify(item: AgentApi.MessageStreamItem) {
   if (canOsNotify() && !notifiedIds.value.has(item.id)) {
     notifiedIds.value.add(item.id);
     saveNotifiedIds();
-    queueOsNotify(title, body);
+    // 点击系统通知即视为已读：单条标记该条，聚合通知一次全部已读；随后回滚到第一条未读
+    queueOsNotify(
+      title,
+      body,
+      () => {
+        markOneRead(Number(item.id));
+        scrollToFirstUnread();
+      },
+      () => {
+        markMessageRead().catch(() => {});
+        messages.value.forEach((m) => {
+          m.read = true;
+          m.isNew = false;
+        });
+        unreadCount.value = 0;
+        dispatchUnreadSync();
+        refreshUnread();
+        scrollToFirstUnread();
+      },
+    );
   }
 }
 
@@ -182,6 +261,43 @@ async function markAllRead() {
   }
 }
 
+/** 单条已读（点击系统通知时用）：落库 + 本地取消高亮 + 同步未读数 */
+function markOneRead(backendId: number) {
+  if (!backendId) return;
+  markMessageRead([backendId]).catch(() => {});
+  const target = messages.value.find((m) => m.backendId === backendId);
+  if (target) {
+    target.read = true;
+    target.isNew = false;
+  }
+  unreadCount.value = Math.max(0, unreadCount.value - 1);
+  dispatchUnreadSync();
+  refreshUnread();
+}
+
+/** 已读请求合并：同批 id 去抖后一次提交，避免逐条并发 */
+function enqueueRead(backendId: number) {
+  if (!backendId) return;
+  pendingReadIds.add(backendId);
+  if (pendingReadTimer) return;
+  pendingReadTimer = window.setTimeout(() => {
+    pendingReadTimer = null;
+    flushPendingRead();
+  }, READ_BATCH_DELAY);
+}
+
+/** 立即提交待读 id（离开页面时兜底） */
+function flushPendingRead() {
+  if (pendingReadTimer) {
+    clearTimeout(pendingReadTimer);
+    pendingReadTimer = null;
+  }
+  if (pendingReadIds.size === 0) return;
+  const ids = [...pendingReadIds];
+  pendingReadIds.clear();
+  markMessageRead(ids).catch(() => {});
+}
+
 /** 滚动到列表底部（看到最新消息）即视为已读；程序性滚动不触发 */
 function onListScroll() {
   if (autoScrolling || unreadCount.value === 0) return;
@@ -203,15 +319,11 @@ function scheduleRead(msgId: number) {
   }
   readTimers.set(
     msgId,
-    setTimeout(async () => {
+    setTimeout(() => {
       readTimers.delete(msgId);
       const target = messages.value.find((m) => m.id === msgId);
       if (!target || target.read || !target.backendId) return;
-      try {
-        await markMessageRead([target.backendId]);
-      } catch {
-        return;
-      }
+      enqueueRead(target.backendId);
       target.read = true;
       target.isNew = false;
       if (unreadCount.value > 0) unreadCount.value -= 1;
@@ -259,8 +371,8 @@ function fmtTime(ts?: number): string {
 function showTimeDivider(idx: number): boolean {
   if (showNewMarker(idx)) return false;
   if (idx <= 0) return true;
-  const prev = messages.value[idx - 1];
-  const cur = messages.value[idx];
+  const prev = visibleMessages.value[idx - 1];
+  const cur = visibleMessages.value[idx];
   if (!prev || !cur) return false;
   return fmtDate(prev.ts) !== fmtDate(cur.ts);
 }
@@ -336,28 +448,54 @@ function scrollToBottom() {
 }
 
 /** 滚动到第一条未读消息（置顶显示）；无未读返回 false */
-function scrollToFirstUnread(): boolean {
-  const idx = messages.value.findIndex((m) => isUnread(m));
-  const target = idx >= 0 ? messages.value[idx] : undefined;
+function scrollToFirstUnread(retries = 10): boolean {
+  const idx = visibleMessages.value.findIndex((m) => isUnread(m));
+  const target = idx >= 0 ? visibleMessages.value[idx] : undefined;
   if (!target) return false;
   autoScrolling = true;
+  const finish = () => {
+    window.setTimeout(() => {
+      autoScrolling = false;
+    }, 400);
+  };
+  // 元素可能尚未挂载（长列表/异步渲染）→ 有界重试，避免一次失败就停在顶部
+  const tryScroll = (attempt: number) => {
+    const el = msgElements.get(target.id);
+    const list = listRef.value;
+    if (el && list) {
+      // 相对滚动容器的偏移：offsetTop 受 offsetParent 影响，长列表里可能不准
+      const top =
+        el.getBoundingClientRect().top -
+        list.getBoundingClientRect().top +
+        list.scrollTop;
+      list.scrollTop = Math.max(0, top - 8);
+      finish();
+      return;
+    }
+    if (attempt < retries) {
+      window.setTimeout(() => tryScroll(attempt + 1), 120);
+      return;
+    }
+    autoScrolling = false;
+  };
   nextTick(() => {
-    requestAnimationFrame(() => {
-      const el = msgElements.get(target.id);
-      const list = listRef.value;
-      if (el && list) {
-        list.scrollTop = Math.max(0, el.offsetTop - 8);
-      }
-      setTimeout(() => {
-        autoScrolling = false;
-      }, 400);
-    });
+    requestAnimationFrame(() => tryScroll(0));
   });
   return true;
 }
 
+async function switchTab(tab: 'chat' | 'notifications') {
+  if (activeTab.value === tab) return;
+  activeTab.value = tab;
+  await nextTick();
+  measureListHeight();
+  if (!scrollToFirstUnread()) {
+    scrollToBottom();
+  }
+}
+
 function pushMessage(msg: Omit<Message, 'id'>): Message {
-  const item = { ...msg, id: ++msgSeq, ts: msg.ts || Date.now() };
+  const item = reactive({ ...msg, id: ++msgSeq, ts: msg.ts || Date.now() });
   messages.value.push(item);
   scrollToBottom();
   return item;
@@ -365,14 +503,12 @@ function pushMessage(msg: Omit<Message, 'id'>): Message {
 
 async function fetchStatus() {
   try {
-    const cfg = await getAllSystemConfigApi();
-    agentEnabled.value = cfg?.['agent.enabled'] === true;
-    providerName.value = cfg?.['agent.default_provider'] || '';
-    const effort = String(cfg?.['agent.reasoning_effort'] || 'high');
-    reasoningEffort.value = ['high', 'low', 'max'].includes(effort)
-      ? (effort as 'high' | 'low' | 'max')
-      : 'high';
-    thinkingEnabled.value = !(cfg?.['agent.disable_thinking'] === true);
+    const status = await getAgentStatus();
+    agentEnabled.value = status.enabled;
+    providerName.value = status.provider;
+    modelName.value = status.model;
+    reasoningEffort.value = status.reasoning_effort;
+    thinkingEnabled.value = status.thinking_enabled;
   } catch {
     agentEnabled.value = false;
   }
@@ -439,11 +575,65 @@ function startMessageStream() {
   );
 }
 
+function chooseAttachment() {
+  attachmentInput.value?.click();
+}
+
+async function onAttachmentSelected(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  input.value = '';
+  for (const file of files.slice(0, 3 - attachments.value.length)) {
+    try {
+      const result = await uploadAgentAttachment(file);
+      attachments.value.push({
+        name: result.name,
+        text: result.text,
+        image_data: result.image_data,
+        media_type: result.media_type,
+      });
+    } catch (error: any) {
+      if (error?.response?.status === 413) {
+        message.error('附件超过服务器上传限制');
+      } else {
+        message.error(
+          error?.response?.data?.detail ||
+            error?.response?.data?.message ||
+            error?.message ||
+            `附件 ${file.name} 上传失败`,
+        );
+      }
+    }
+  }
+}
+
+function removeAttachment(index: number) {
+  attachments.value.splice(index, 1);
+}
+
+function retryMessage(target: Message) {
+  if (sending.value) return;
+  const index = messages.value.findIndex((item) => item.id === target.id);
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const item = messages.value[i];
+    if (item?.role === 'user' && item.content) {
+      void send(item.content);
+      return;
+    }
+  }
+}
+
 async function send(text?: string) {
   const question = (text ?? input.value).trim();
   if (!question || sending.value) return;
+  const pendingAttachments = [...attachments.value];
   input.value = '';
-  pushMessage({ role: 'user', content: question });
+  attachments.value = [];
+  pushMessage({
+    role: 'user',
+    content: question,
+    attachments: pendingAttachments,
+  });
 
   if (!agentEnabled.value) {
     // 内置命令模式：回复经消息流返回
@@ -474,12 +664,33 @@ async function send(text?: string) {
   streamAgentChat(
     {
       question,
+      attachments: pendingAttachments,
+      session_id: currentSessionId.value,
       reasoning_effort: reasoningEffort.value,
       disable_thinking: !thinkingEnabled.value,
     },
     {
       onEvent: (ev) => {
         switch (ev.type) {
+          case 'turn_start': {
+            currentTurnId.value = ev.turn_id || '';
+
+            break;
+          }
+          case 'token': {
+            assistant.content += ev.content || '';
+            scrollToBottom();
+
+            break;
+          }
+          case 'cancelled': {
+            assistant.content = assistant.content
+              ? `${assistant.content}\n\n（已停止）`
+              : ev.content || '已停止本次请求';
+            assistant.streaming = false;
+
+            break;
+          }
           case 'answer': {
             assistant.content = ev.content || '';
             assistant.streaming = false;
@@ -490,6 +701,7 @@ async function send(text?: string) {
               );
             }
             scrollToBottom();
+            void loadSessions();
 
             break;
           }
@@ -498,8 +710,8 @@ async function send(text?: string) {
               tool: ev.tool || '',
               arguments: ev.arguments || {},
               message: ev.message || '',
+              pending_action_id: ev.pending_action_id || '',
             };
-            sending.value = false;
 
             break;
           }
@@ -513,6 +725,11 @@ async function send(text?: string) {
             assistant.reasoning =
               (assistant.reasoning || '') + (ev.content || '');
             scrollToBottom();
+
+            break;
+          }
+          case 'usage': {
+            assistant.usage = ev.total_tokens || 0;
 
             break;
           }
@@ -541,22 +758,48 @@ async function send(text?: string) {
         }
       },
       onError: (error) => {
-        assistant.content = `请求失败：${error?.message || '网络错误'}`;
+        if (
+          error?.name === 'AbortError' ||
+          /aborted|abort/i.test(error?.message || '')
+        ) {
+          assistant.streaming = false;
+          return;
+        }
+        assistant.content = `请求失败：${error?.detail || error?.data?.detail || error?.message || '网络错误'}`;
         assistant.streaming = false;
       },
       onEnd: () => {
         sending.value = false;
         assistant.streaming = false;
+        currentTurnId.value = '';
       },
     },
     chatAbort.value.signal,
   );
 }
 
-function stop() {
+async function stop() {
+  const turnId = currentTurnId.value;
   chatAbort.value?.abort();
   chatAbort.value = null;
   sending.value = false;
+  const assistant = [...messages.value]
+    .reverse()
+    .find((msg) => msg.role === 'assistant' && msg.streaming);
+  if (assistant) {
+    assistant.content = assistant.content
+      ? `${assistant.content}\n\n（已停止）`
+      : '已停止本次请求';
+    assistant.streaming = false;
+  }
+  if (turnId) {
+    try {
+      await cancelAgentChat(turnId);
+    } catch {
+      // 网络失败时仍保持本地停止状态，后端会在下一个事件点继续取消
+    }
+  }
+  currentTurnId.value = '';
 }
 
 async function approveConfirm() {
@@ -564,10 +807,7 @@ async function approveConfirm() {
   confirmBusy.value = true;
   try {
     // requestClient 已解包 data 且 code≠0 会抛错：成功 await 即为执行成功
-    await confirmAgentChat({
-      tool: confirmState.value.tool,
-      arguments: confirmState.value.arguments,
-    });
+    await confirmAgentChat(confirmState.value.pending_action_id);
     pushMessage({ role: 'assistant', content: '已执行确认操作。' });
   } catch (error: any) {
     pushMessage({
@@ -580,9 +820,19 @@ async function approveConfirm() {
   }
 }
 
-function rejectConfirm() {
-  pushMessage({ role: 'assistant', content: '已取消该操作。' });
-  confirmState.value = null;
+async function rejectConfirm() {
+  if (!confirmState.value) return;
+  try {
+    await rejectAgentChat(confirmState.value.pending_action_id);
+    pushMessage({ role: 'assistant', content: '已取消该操作。' });
+  } catch (error: any) {
+    pushMessage({
+      role: 'assistant',
+      content: `取消失败：${error?.message || '未知错误'}`,
+    });
+  } finally {
+    confirmState.value = null;
+  }
 }
 
 async function openMemoryModal() {
@@ -609,14 +859,95 @@ async function removeMemory(text: string) {
 
 async function clearSession() {
   try {
-    await clearAgentChat('');
+    await clearAgentChat(currentSessionId.value);
   } catch {
     // ignore
   }
-  messages.value = [];
+  messages.value = messages.value.filter((msg) => msg.role === 'system');
   // 通知流游标推进到当前最新，刷新后不再重放旧通知
   streamCursor = Math.max(streamCursor, 0);
   saveStreamCursor(streamCursor);
+}
+
+async function loadSessions() {
+  sessionsLoading.value = true;
+  try {
+    const res = await getAgentSessions();
+    sessions.value = res.sessions || [];
+  } catch {
+    sessions.value = [];
+  } finally {
+    sessionsLoading.value = false;
+  }
+}
+
+async function renameSession(sessionId: string, title: string) {
+  try {
+    await renameAgentSession(sessionId, title);
+    await loadSessions();
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '重命名失败');
+  }
+}
+
+async function loadSessionMessages() {
+  const systemMessages = messages.value.filter((msg) => msg.role === 'system');
+  messages.value = systemMessages;
+  try {
+    const res: any = await getConversation(currentSessionId.value);
+    for (const item of res?.messages || []) {
+      if (item.role === 'user' || item.role === 'assistant') {
+        pushMessage({
+          role: item.role,
+          content: item.content || '',
+          ts: (Number(item.ts) || 0) * 1000,
+          attachments: item.attachments || [],
+        });
+      }
+    }
+  } catch {
+    // 保留空会话，通知区不受影响
+  }
+}
+
+function addDraftSession() {
+  const id = currentSessionId.value;
+  if (!id) return;
+  sessions.value = [
+    {
+      session_id: id,
+      title: '新对话',
+      updated_at: new Date().toISOString(),
+      token_usage: 0,
+    },
+    ...sessions.value.filter((item) => item.session_id !== id),
+  ];
+}
+
+async function createSession() {
+  const res = await createAgentSession();
+  currentSessionId.value = res.session_id;
+  activeTab.value = 'chat';
+  sessionDrawer.value = false;
+  await loadSessions();
+  addDraftSession();
+  await loadSessionMessages();
+}
+
+async function selectSession(sessionId: string) {
+  if (sending.value || sessionId === currentSessionId.value) return;
+  currentSessionId.value = sessionId;
+  activeTab.value = 'chat';
+  sessionDrawer.value = false;
+  await loadSessionMessages();
+}
+
+async function deleteSession(sessionId: string) {
+  await deleteAgentSession(sessionId);
+  if (sessionId === currentSessionId.value) {
+    await createSession();
+  }
+  await loadSessions();
 }
 
 // 移动端无 Shift+Enter：Enter 保留换行（textarea 默认），发送靠按钮
@@ -645,7 +976,7 @@ async function restoreTimeline() {
   // - 无可靠时间的消息（ts=0）按来源相对顺序排在末尾
   const merged: (Omit<Message, 'id'> & { _sort: number; ts: number })[] = [];
   try {
-    const res: any = await getConversation('');
+    const res: any = await getConversation(currentSessionId.value);
     const list = res?.messages || [];
     let order = 0;
     for (const m of list) {
@@ -717,11 +1048,84 @@ function onStorageSync(e: StorageEvent) {
   }
 }
 
+const MESSAGE_FOCUS_DURATION = 2400;
+let messageFocusTimer: null | number = null;
+let messageFocusTarget: HTMLElement | null = null;
+
+function clearMessageFocus() {
+  if (messageFocusTimer) {
+    clearTimeout(messageFocusTimer);
+    messageFocusTimer = null;
+  }
+  messageFocusTarget?.classList.remove('message-focus');
+  messageFocusTarget = null;
+}
+
+function highlightMessage(el: HTMLElement) {
+  clearMessageFocus();
+  messageFocusTarget = el;
+  // 重新触发动画：同一元素再次定位时先移除再强制回流
+  el.classList.remove('message-focus');
+  void el.offsetWidth;
+  el.classList.add('message-focus');
+  messageFocusTimer = window.setTimeout(() => {
+    el.classList.remove('message-focus');
+    if (messageFocusTarget === el) messageFocusTarget = null;
+    messageFocusTimer = null;
+  }, MESSAGE_FOCUS_DURATION);
+}
+
+function scrollToMessage(backendId: number, retries = 12): boolean {
+  const target = messages.value.find((m) => m.backendId === backendId);
+  if (!target) return false;
+  const list = listRef.value;
+  const tryScroll = (attempt: number) => {
+    const el = msgElements.get(target.id);
+    if (el && list) {
+      const top =
+        el.getBoundingClientRect().top -
+        list.getBoundingClientRect().top +
+        list.scrollTop;
+      list.scrollTop = Math.max(0, top - 8);
+      highlightMessage(el);
+      return true;
+    }
+    if (attempt < retries) {
+      window.setTimeout(() => tryScroll(attempt + 1), 120);
+    }
+    return false;
+  };
+  return tryScroll(0);
+}
+
+async function focusMessageFromRoute(): Promise<boolean> {
+  const backendId = Number(route.query.messageId || route.query.notify || 0);
+  if (!backendId) return false;
+  await switchTab('notifications');
+  await nextTick();
+  window.setTimeout(() => {
+    if (!scrollToMessage(backendId)) scrollToFirstUnread();
+  }, 200);
+  return true;
+}
+
+// 已在消息中心时再次点击铃铛通知，只更新 query 不会重新挂载，需要监听 query 变化定位
+watch(
+  () => route.query.messageId,
+  (value) => {
+    if (value) void focusMessageFromRoute();
+  },
+);
+
 onMounted(async () => {
   streamCursor = loadStreamCursor();
   window.addEventListener('storage', onStorageSync);
   window.addEventListener('resize', measureListHeight);
   document.addEventListener('visibilitychange', onVisibilityChange);
+  // 点击系统通知（可能已在本页）时重新定位到第一条未读
+  unlistenScrollFirstUnread = listenScrollFirstUnread(() => {
+    scrollToFirstUnread();
+  });
   fetchStatus();
   measureListHeight();
   // 视口观察：进视口的未读消息自动已读
@@ -735,17 +1139,20 @@ onMounted(async () => {
     },
     { root: listRef.value, threshold: 0.3 },
   );
+  // 每次进入消息中心都从新会话开始，侧栏立即标记“新对话”
+  await createSession();
   await restoreTimeline();
   measureListHeight();
-  // 打开时定位到第一条未读；全部已读时才滚到最新消息（底部）
+  const focusedFromRoute = await focusMessageFromRoute();
+  // 打开时定位到第一条未读；指定消息时不要覆盖定位。
   nextTick(() => {
-    if (!scrollToFirstUnread()) {
+    if (!focusedFromRoute && !scrollToFirstUnread()) {
       scrollToBottom();
     }
   });
   // 内容渲染稳定后再补一次（图片/富文本异步渲染会改变高度）
   window.setTimeout(() => {
-    if (!scrollToFirstUnread()) {
+    if (!focusedFromRoute && !scrollToFirstUnread()) {
       scrollToBottom();
     }
   }, 300);
@@ -758,24 +1165,28 @@ onBeforeUnmount(() => {
   window.removeEventListener('storage', onStorageSync);
   window.removeEventListener('resize', measureListHeight);
   document.removeEventListener('visibilitychange', onVisibilityChange);
+  unlistenScrollFirstUnread?.();
+  unlistenScrollFirstUnread = null;
   chatAbort.value?.abort();
   streamAbort.value?.abort();
   if (streamReconnectTimer) clearTimeout(streamReconnectTimer);
+  clearMessageFocus();
   ioObserver?.disconnect();
+  flushPendingRead();
   clearReadTimers();
 });
 
-/** 页面是否曾切到后台（仅真正从后台切回时才全部已读，避免初始加载误清未读） */
+/** 页面是否曾切到后台（仅真正从后台切回时才重新定位，避免初始加载误判） */
 let wasHidden = false;
 
-/** 从后台切回页面时刷新未读数并全部已读 */
+/** 从后台切回页面时刷新未读数并定位到第一条未读（由视口观察逐条标记已读，不整页清空） */
 function onVisibilityChange() {
   if (document.visibilityState === 'hidden') {
     wasHidden = true;
   } else if (document.visibilityState === 'visible' && wasHidden) {
     wasHidden = false;
     refreshUnread();
-    markAllRead();
+    scrollToFirstUnread();
   }
 }
 </script>
@@ -786,36 +1197,31 @@ function onVisibilityChange() {
     :style="{ height: listHeight ? `${listHeight}px` : undefined }"
   >
     <!-- 头部 -->
-    <div
-      class="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-4 py-2.5"
-      :style="{
-        background: 'hsl(var(--card))',
-        borderColor: 'hsl(var(--border))',
-      }"
-    >
-      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-1">
-        <IconifyIcon
-          icon="lucide:message-square-text"
-          class="size-5 shrink-0"
-          :style="{ color: 'hsl(var(--primary))' }"
-        />
-        <span
-          class="text-sm font-semibold"
-          :style="{ color: 'hsl(var(--foreground))' }"
-        >
-          消息中心
+    <div class="chat-header">
+      <div class="header-main">
+        <span class="header-icon">
+          <IconifyIcon icon="lucide:message-square-text" class="size-4" />
         </span>
-        <NTag size="small" :type="agentEnabled ? 'success' : 'default'" round>
-          {{ modeLabel }}
-        </NTag>
-        <NTag v-if="agentEnabled && kbTotal" size="small" round>
-          知识库 {{ kbTotal }}
-        </NTag>
-        <NTag v-if="unreadCount" type="error" size="small" round>
-          未读 {{ unreadCount }}
-        </NTag>
+        <div class="header-title-group">
+          <span class="header-title">消息中心</span>
+          <span
+            class="provider-badge"
+            :class="{ 'is-active': agentEnabled }"
+            :title="modeLabel"
+          >
+            <span class="provider-dot"></span>
+            {{ agentEnabled ? providerName || 'AI 助手' : 'AI 未启用' }}
+          </span>
+          <span v-if="agentEnabled && kbTotal" class="meta-pill">
+            知识库 {{ kbTotal }}
+          </span>
+          <span v-if="unreadCount" class="meta-pill is-unread">
+            未读 {{ unreadCount }}
+          </span>
+        </div>
       </div>
-      <div class="flex shrink-0 items-center gap-0.5">
+      <div class="header-actions">
+        <span class="header-divider"></span>
         <NButton
           v-if="unreadCount"
           size="small"
@@ -853,80 +1259,145 @@ function onVisibilityChange() {
       </div>
     </div>
 
-    <!-- 消息区 -->
-    <div
-      ref="listRef"
-      class="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4"
-      @scroll="onListScroll"
-    >
-      <div class="mx-auto w-full max-w-3xl">
-        <WelcomePanel
-          v-if="messages.length === 0"
-          :agent-enabled="agentEnabled"
-          :provider-name="providerName"
-          @prompt="send"
-        />
-        <template v-for="(msg, idx) in messages" :key="msg.id">
-          <div
-            v-if="showTimeDivider(idx)"
-            class="my-2 flex items-center justify-center"
-          >
-            <span
-              class="rounded-full px-3 py-0.5 text-xs"
-              :style="{
-                color: 'hsl(var(--muted-foreground))',
-                background: 'hsl(var(--muted) / 50%)',
-              }"
-            >
-              {{ fmtDate(msg.ts) }}
-            </span>
-          </div>
-          <div v-if="showNewMarker(idx)" class="my-2 flex items-center gap-2">
-            <span
-              class="h-px flex-1"
-              :style="{ background: 'hsl(var(--border))' }"
-            ></span>
-            <span
-              class="text-xs"
-              :style="{ color: 'hsl(var(--muted-foreground))' }"
-            >
-              {{ fmtTime(msg.ts) }}
-            </span>
-            <span
-              class="h-px flex-1"
-              :style="{ background: 'hsl(var(--border))' }"
-            ></span>
-          </div>
-          <div
-            :ref="(el: unknown) => setMsgRef(msg.id, el)"
-            :data-msg-id="msg.id"
-          >
-            <ChatMessage
-              :role="msg.role"
-              :content="msg.content"
-              :image="msg.image"
-              :items="msg.items"
-              :url="msg.url"
-              :tool-events="msg.toolEvents"
-              :reasoning="msg.reasoning"
-              :streaming="msg.streaming"
-            />
-          </div>
+    <div class="tab-bar">
+      <NButton
+        v-if="activeTab === 'chat'"
+        size="small"
+        quaternary
+        class="session-trigger"
+        aria-label="打开会话列表"
+        @click="sessionDrawer = true"
+      >
+        <template #icon>
+          <IconifyIcon icon="lucide:panel-left" class="size-4" />
         </template>
-        <ConfirmCard
-          v-if="confirmState"
-          :tool="confirmState.tool"
-          :arguments="confirmState.arguments"
-          :message="confirmState.message"
-          :busy="confirmBusy"
-          @approve="approveConfirm"
-          @reject="rejectConfirm"
+      </NButton>
+      <div class="tab-buttons">
+        <button
+          type="button"
+          :class="{ active: activeTab === 'chat' }"
+          @click="switchTab('chat')"
+        >
+          AI 对话
+        </button>
+        <button
+          type="button"
+          :class="{ active: activeTab === 'notifications' }"
+          @click="switchTab('notifications')"
+        >
+          系统通知
+        </button>
+      </div>
+    </div>
+
+    <div class="main-layout">
+      <div v-if="activeTab === 'chat'" class="desktop-sidebar">
+        <SessionSidebar
+          :sessions="sessions"
+          :current-session-id="currentSessionId"
+          :loading="sessionsLoading"
+          @create="createSession"
+          @select="selectSession"
+          @rename="renameSession"
+          @delete="deleteSession"
         />
-        <div v-if="sending" class="flex justify-center py-2">
-          <NSpin size="small" />
+      </div>
+      <div class="main-content">
+        <!-- 消息区 -->
+        <div
+          ref="listRef"
+          class="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4"
+          @scroll="onListScroll"
+        >
+          <div class="mx-auto w-full max-w-3xl">
+            <WelcomePanel
+              v-if="visibleMessages.length === 0 && activeTab === 'chat'"
+              :agent-enabled="agentEnabled"
+              :provider-name="providerName"
+              @prompt="send"
+            />
+            <template v-for="(msg, idx) in visibleMessages" :key="msg.id">
+              <div
+                v-if="showTimeDivider(idx)"
+                class="my-2 flex items-center justify-center"
+              >
+                <span
+                  class="rounded-full px-3 py-0.5 text-xs"
+                  :style="{
+                    color: 'hsl(var(--muted-foreground))',
+                    background: 'hsl(var(--muted) / 50%)',
+                  }"
+                >
+                  {{ fmtDate(msg.ts) }}
+                </span>
+              </div>
+              <div
+                v-if="showNewMarker(idx)"
+                class="my-2 flex items-center gap-2"
+              >
+                <span
+                  class="h-px flex-1"
+                  :style="{ background: 'hsl(var(--border))' }"
+                ></span>
+                <span
+                  class="text-xs"
+                  :style="{ color: 'hsl(var(--muted-foreground))' }"
+                >
+                  {{ fmtTime(msg.ts) }}
+                </span>
+                <span
+                  class="h-px flex-1"
+                  :style="{ background: 'hsl(var(--border))' }"
+                ></span>
+              </div>
+              <div
+                :ref="(el: unknown) => setMsgRef(msg.id, el)"
+                :data-msg-id="msg.id"
+                class="message-block"
+              >
+                <ChatMessage
+                  :role="msg.role"
+                  :content="msg.content"
+                  :image="msg.image"
+                  :items="msg.items"
+                  :url="msg.url"
+                  :tool-events="msg.toolEvents"
+                  :attachments="msg.attachments"
+                  :reasoning="msg.reasoning"
+                  :streaming="msg.streaming"
+                  :usage="msg.usage"
+                  @retry="retryMessage(msg)"
+                />
+              </div>
+            </template>
+            <ConfirmCard
+              v-if="confirmState"
+              :tool="confirmState.tool"
+              :arguments="confirmState.arguments"
+              :message="confirmState.message"
+              :busy="confirmBusy"
+              @approve="approveConfirm"
+              @reject="rejectConfirm"
+            />
+            <div v-if="sending" class="flex justify-center py-2">
+              <NSpin size="small" />
+            </div>
+          </div>
         </div>
       </div>
     </div>
+
+    <NDrawer v-model:show="sessionDrawer" placement="left" width="82%">
+      <SessionSidebar
+        :sessions="sessions"
+        :current-session-id="currentSessionId"
+        :loading="sessionsLoading"
+        @create="createSession"
+        @select="selectSession"
+        @rename="renameSession"
+        @delete="deleteSession"
+      />
+    </NDrawer>
 
     <!-- 偏好记忆弹窗 -->
     <NModal
@@ -970,13 +1441,58 @@ function onVisibilityChange() {
 
     <!-- 输入区 -->
     <div
+      v-if="activeTab === 'chat'"
       class="border-t px-4 py-3"
       :style="{
         background: 'hsl(var(--card))',
         borderColor: 'hsl(var(--border))',
       }"
     >
+      <div
+        v-if="attachments.length"
+        class="mx-auto mb-2 flex w-full max-w-3xl flex-wrap gap-1.5"
+      >
+        <span
+          v-for="(item, index) in attachments"
+          :key="`${item.name}-${index}`"
+          class="composer-attachment"
+        >
+          <img
+            v-if="item.image_data"
+            :src="`data:${item.media_type || 'image/png'};base64,${item.image_data}`"
+            :alt="item.name"
+            class="composer-attachment-thumb"
+          />
+          <IconifyIcon v-else icon="lucide:file-text" class="size-3" />
+          {{ item.name }}
+          <button
+            type="button"
+            aria-label="移除附件"
+            @click="removeAttachment(index)"
+          >
+            <IconifyIcon icon="lucide:x" class="size-3" />
+          </button>
+        </span>
+      </div>
       <div class="mx-auto flex w-full max-w-3xl items-end gap-1.5">
+        <input
+          ref="attachmentInput"
+          type="file"
+          class="hidden"
+          multiple
+          @change="onAttachmentSelected"
+        />
+        <NButton
+          quaternary
+          aria-label="添加附件"
+          title="支持任意文件，单文件最大 25 MB，最多 3 个"
+          :disabled="!agentEnabled || attachments.length >= 3"
+          @click="chooseAttachment"
+        >
+          <template #icon>
+            <IconifyIcon icon="lucide:paperclip" class="size-4" />
+          </template>
+        </NButton>
         <div class="min-w-0 flex-1">
           <NInput
             v-model:value="input"
@@ -1019,70 +1535,424 @@ function onVisibilityChange() {
         </NButton>
       </div>
 
-      <!-- 底部工具栏：推理强度 + 深度思考（主流 Agent 风格） -->
+      <!-- 本次会话参数：收纳到 Popover，保持输入区简洁 -->
       <div
         v-if="agentEnabled"
-        class="mx-auto mt-2 flex w-full max-w-3xl flex-wrap items-center justify-between gap-2"
+        class="mx-auto mt-2 flex w-full max-w-3xl items-center justify-end"
       >
-        <div
-          class="flex items-center gap-1.5 rounded-full px-2 py-0.5"
-          style="background: hsl(var(--muted) / 40%)"
-        >
-          <span
-            class="flex shrink-0 items-center gap-1 whitespace-nowrap text-xs"
-            style="color: hsl(var(--muted-foreground))"
-          >
-            <IconifyIcon icon="lucide:brain-cog" class="size-3.5" />
-            <span>推理</span>
-          </span>
-          <NTooltip :disabled="reasoningEffort !== 'max'" placement="top">
-            <template #trigger>
-              <NSelect
-                size="tiny"
-                :bordered="false"
-                :value="reasoningEffort"
-                :options="reasoningOptions"
-                :render-label="renderReasoningLabel"
-                :style="{ width: '96px' }"
-                class="shrink-0"
-                @update:value="(v) => (reasoningEffort = v)"
-              />
-            </template>
-            {{ MAX_EFFORT_TIP }}
-          </NTooltip>
-        </div>
-
-        <button
-          type="button"
-          class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all"
-          :aria-pressed="thinkingEnabled"
-          :style="
-            thinkingEnabled
-              ? {
-                  background: 'hsl(var(--primary) / 12%)',
-                  color: 'hsl(var(--primary))',
-                  borderColor: 'hsl(var(--primary) / 40%)',
-                }
-              : {
-                  background: 'hsl(var(--muted) / 40%)',
-                  color: 'hsl(var(--muted-foreground))',
-                  borderColor: 'hsl(var(--border))',
-                }
-          "
-          @click="thinkingEnabled = !thinkingEnabled"
-        >
-          <IconifyIcon icon="lucide:sparkles" class="size-3.5" />
-          <span>深度思考</span>
-          <span
-            class="size-1.5 rounded-full"
-            :style="{
-              background: thinkingEnabled
-                ? 'hsl(var(--primary))'
-                : 'hsl(var(--muted-foreground) / 60%)',
-            }"
-          ></span>
-        </button>
+        <NPopover trigger="click" placement="top-end" :show-arrow="false">
+          <template #trigger>
+            <button class="agent-options-trigger" type="button">
+              <IconifyIcon icon="lucide:sliders-horizontal" class="size-3.5" />
+              <span class="agent-options-model">{{
+                modelName || providerName || 'AI 助手'
+              }}</span>
+              <span class="agent-options-sep">·</span>
+              <span>{{ thinkingEnabled ? '思考开' : '思考关' }}</span>
+              <IconifyIcon icon="lucide:chevron-up" class="size-3" />
+            </button>
+          </template>
+          <div class="w-64 p-1">
+            <div class="mb-2 text-xs font-semibold">本次对话参数</div>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between text-xs">
+                <span>Provider</span>
+                <span class="opacity-70">{{ providerName || '-' }}</span>
+              </div>
+              <div class="flex items-center justify-between text-xs">
+                <span>模型</span>
+                <span class="max-w-36 truncate opacity-70">{{
+                  modelName || '-'
+                }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <span>推理强度</span>
+                <NTooltip :disabled="reasoningEffort !== 'max'" placement="top">
+                  <template #trigger>
+                    <NSelect
+                      size="tiny"
+                      :value="reasoningEffort"
+                      :options="reasoningOptions"
+                      :render-label="renderReasoningLabel"
+                      class="w-28"
+                      @update:value="(v) => (reasoningEffort = v)"
+                    />
+                  </template>
+                  {{ MAX_EFFORT_TIP }}
+                </NTooltip>
+              </div>
+              <div class="flex items-center justify-between text-xs">
+                <span>深度思考</span>
+                <NSwitch v-model:value="thinkingEnabled" size="small" />
+              </div>
+              <div class="flex items-center justify-between text-xs">
+                <span>本次会话 Token</span>
+                <span class="opacity-70">{{
+                  sessionTokens.toLocaleString()
+                }}</span>
+              </div>
+            </div>
+          </div>
+        </NPopover>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.chat-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.header-main,
+.header-title-group,
+.provider-badge,
+.header-actions {
+  display: flex;
+  align-items: center;
+}
+
+.header-main {
+  gap: 10px;
+  min-width: 0;
+}
+
+.header-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--tblr-primary);
+  background: var(--tblr-primary-light);
+  border: 1px solid hsl(var(--primary) / 14%);
+  border-radius: 8px;
+}
+
+.header-title-group {
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.header-title {
+  margin-right: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  letter-spacing: -0.01em;
+}
+
+.provider-badge {
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 45%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+}
+
+.provider-badge.is-active {
+  color: var(--tblr-primary);
+  background: var(--tblr-primary-light);
+  border-color: hsl(var(--primary) / 18%);
+}
+
+.provider-dot {
+  width: 5px;
+  height: 5px;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.meta-pill {
+  padding: 2px 7px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 35%);
+  border-radius: 999px;
+}
+
+.meta-pill.is-unread {
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 8%);
+}
+
+.header-actions {
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.header-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: hsl(var(--border));
+}
+
+.header-actions :deep(.n-button) {
+  color: hsl(var(--muted-foreground));
+}
+
+.header-actions :deep(.n-button:hover) {
+  color: var(--tblr-primary);
+  background: var(--tblr-primary-light);
+}
+
+.composer-attachment {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  max-width: 220px;
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  background: hsl(var(--muted) / 35%);
+  border-radius: 6px;
+}
+
+.composer-attachment-thumb {
+  width: 18px;
+  height: 18px;
+  object-fit: cover;
+  border-radius: 3px;
+}
+
+.composer-attachment button {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.agent-options-trigger {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 9px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: hsl(var(--muted) / 32%);
+  border: 1px solid hsl(var(--border) / 80%);
+  border-radius: 999px;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.agent-options-trigger:hover {
+  color: var(--tblr-primary);
+  background: var(--tblr-primary-light);
+}
+
+.agent-options-model {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: hsl(var(--foreground) / 80%);
+  white-space: nowrap;
+}
+
+.agent-options-sep {
+  opacity: 0.4;
+}
+
+.tab-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.session-trigger {
+  display: none;
+}
+
+.tab-buttons {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: hsl(var(--muted) / 40%);
+  border-radius: 8px;
+}
+
+.tab-buttons button {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.tab-buttons button.active {
+  font-weight: 500;
+  color: hsl(var(--primary));
+  background: hsl(var(--card));
+  box-shadow: 0 1px 3px hsl(var(--foreground) / 8%);
+}
+
+.main-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.main-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.message-block {
+  contain-intrinsic-size: auto 120px;
+  content-visibility: auto;
+}
+
+.message-focus {
+  position: relative;
+  z-index: 1;
+}
+
+.message-focus::before,
+.message-focus::after {
+  position: absolute;
+  pointer-events: none;
+  content: '';
+}
+
+/* 柔和底色光晕，比整圈 outline 更克制 */
+.message-focus::before {
+  inset: -8px -12px;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary) / 12%),
+    hsl(var(--primary) / 4%) 42%,
+    transparent 78%
+  );
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--primary) / 14%),
+    0 12px 30px -14px hsl(var(--primary) / 35%);
+  animation: message-focus-glow 2.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* 左侧强调线，提示定位落点 */
+.message-focus::after {
+  top: 10px;
+  bottom: 10px;
+  left: -12px;
+  width: 3px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    hsl(var(--primary) / 90%) 18%,
+    hsl(var(--primary) / 90%) 82%,
+    transparent
+  );
+  border-radius: 999px;
+  animation: message-focus-bar 2.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes message-focus-glow {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.996);
+  }
+
+  12% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes message-focus-bar {
+  0% {
+    opacity: 0;
+    transform: scaleY(0.35);
+  }
+
+  14% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-focus::before,
+  .message-focus::after {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .session-trigger {
+    display: inline-flex;
+  }
+
+  .desktop-sidebar {
+    display: none;
+  }
+
+  .tab-bar {
+    padding: 6px 10px;
+  }
+
+  .chat-header {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .header-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .header-title {
+    font-size: 14px;
+  }
+
+  .header-divider {
+    margin: 0 2px;
+  }
+}
+</style>

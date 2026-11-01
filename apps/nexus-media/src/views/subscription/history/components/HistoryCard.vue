@@ -3,7 +3,7 @@ import { IconifyIcon } from '@vben/icons';
 
 import { NButton, NButtonGroup, NTooltip } from 'naive-ui';
 
-import { getImgUrl, handleImageError } from '#/utils/image';
+import MediaPoster from '#/components/media/MediaPoster.vue';
 
 interface HistoryItem {
   id: number | string;
@@ -12,6 +12,7 @@ interface HistoryItem {
   season: string;
   tmdbid: string;
   image: string;
+  content_profile?: string;
   total: number;
   start: number;
   desc: string;
@@ -40,18 +41,26 @@ function getTmdbUrl() {
     <div class="history-card-inner">
       <div class="history-card-poster">
         <a
+          v-if="item.tmdbid"
           :href="getTmdbUrl()"
           target="_blank"
           rel="noopener noreferrer"
           class="history-card-link"
         >
-          <img
-            :src="getImgUrl(item.image)"
+          <MediaPoster
+            :src="item.image"
+            :content-profile="item.content_profile"
             class="history-card-img"
             :alt="item.title"
-            @error="handleImageError"
           />
         </a>
+        <MediaPoster
+          v-else
+          :src="item.image"
+          :content-profile="item.content_profile"
+          class="history-card-img"
+          :alt="item.title"
+        />
       </div>
 
       <div class="history-card-info">
@@ -67,7 +76,7 @@ function getTmdbUrl() {
           </span>
         </div>
         <div v-if="item.total > 0" class="history-card-episodes">
-          共 {{ item.total - item.start }} 集
+          共 {{ item.total }} 集
         </div>
         <div class="history-card-desc" :title="item.desc">
           {{ item.desc }}

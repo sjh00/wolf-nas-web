@@ -89,7 +89,21 @@ class SSE {
 
     const response = await fetch(safeJoinUrl(baseUrl, url), requestInit);
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      let data = '';
+      try {
+        data = await response.text();
+      } catch {
+        // 错误体不可读时仍保留 HTTP 状态错误，避免覆盖原始失败原因。
+      }
+      const error = new Error(
+        `HTTP error! status: ${response.status}`,
+      ) as Error & {
+        data?: string;
+        status?: number;
+      };
+      error.data = data;
+      error.status = response.status;
+      throw error;
     }
 
     const reader = response.body?.getReader();
