@@ -19,10 +19,10 @@ WolfNas 前端项目，基于 [Vben Admin](https://github.com/vbenjs/vue-vben-ad
 pnpm install
 
 # 开发模式
-pnpm dev:nexus
+pnpm dev:wolfnas
 
 # 构建
-pnpm build:nexus
+pnpm build:wolfnas
 ```
 
 开发服务器默认运行在 `http://localhost:5555`，代理到后端 `http://localhost:3000`。

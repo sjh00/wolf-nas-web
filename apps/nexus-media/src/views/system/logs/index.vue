@@ -268,7 +268,7 @@ async function exportLogs() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `nexus-media-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.download = `wolfnas-logs-${new Date().toISOString().slice(0, 10)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
     message.success('日志已导出');

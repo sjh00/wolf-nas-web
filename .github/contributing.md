@@ -36,5 +36,5 @@ After cloning the repo, run:
 # install the dependencies of the project
 $ pnpm install
 # start the frontend app
-$ pnpm dev:nexus
+$ pnpm dev:wolfnas
 ```

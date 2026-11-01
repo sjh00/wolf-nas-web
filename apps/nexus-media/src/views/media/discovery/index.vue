@@ -25,6 +25,7 @@ import {
   getContentProfilePresentationType,
   PluginSlot,
 } from '#/plugin-framework';
+import { getMigratedItem } from '#/utils/legacy-storage';
 
 const route = useRoute();
 const router = useRouter();
@@ -62,7 +63,7 @@ const weekdayOptions = [
 const sentinelRef = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
 let scrollCheckFrame = 0;
-const PREF_KEY = 'nexus.discovery.preference';
+const PREF_KEY = 'wolfnas.discovery.preference';
 
 const pageTitleMap: Record<string, string> = {
   DiscoveryAll: '排行榜',
@@ -176,7 +177,7 @@ function applyPreset() {
   const preset = routePreset[String(route.name)] || {};
   let saved: { feed?: string; provider?: string };
   try {
-    saved = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+    saved = JSON.parse(getMigratedItem(PREF_KEY) || '{}');
   } catch {
     saved = {};
   }

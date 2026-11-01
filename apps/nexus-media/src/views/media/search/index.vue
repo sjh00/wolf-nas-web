@@ -478,7 +478,7 @@ watch(profileSources, (sources) => {
 });
 
 // 持久化当前搜索关键词，用于从其他页面切回（无 query 参数）时恢复标题显示
-const SEARCH_KEYWORD_KEY = 'nexus:search:keyword';
+const SEARCH_KEYWORD_KEY = 'wolfnas:search:keyword';
 function setSearchKeyword(k: string) {
   keyword.value = k;
   try {
@@ -527,7 +527,7 @@ const {
   stop: stopSearchProgress,
 } = useSearchProgress();
 const searchSessionId = ref('');
-const SEARCH_SESSION_KEY = 'nexus:search:session';
+const SEARCH_SESSION_KEY = 'wolfnas:search:session';
 
 function activeFilterCount(item: SearchResultWithFilter): number {
   return Object.values(item.activeFilters).reduce(

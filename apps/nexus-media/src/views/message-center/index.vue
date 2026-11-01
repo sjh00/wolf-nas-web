@@ -52,6 +52,7 @@ import {
   streamMessages,
   uploadAgentAttachment,
 } from '#/api/modules/agent';
+import { getMigratedItem } from '#/utils/legacy-storage';
 import { canOsNotify, queueOsNotify } from '#/utils/os-notify';
 import {
   dispatchUnreadSync,
@@ -176,12 +177,12 @@ let streamReconnectTimer: null | number = null;
 let placeholderId: null | number = null;
 let unlistenScrollFirstUnread: (() => void) | null = null;
 
-const STREAM_CURSOR_KEY = 'nexus-agent-stream-cursor';
-const NOTIFIED_KEY = 'nexus-agent-notified-ids';
+const STREAM_CURSOR_KEY = 'wolfnas-agent-stream-cursor';
+const NOTIFIED_KEY = 'wolfnas-agent-notified-ids';
 
 /** 已推送过 OS 通知的消息 ID 集合（localStorage 持久化，去重防重放） */
 const notifiedIds = ref<Set<number>>(
-  new Set(JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '[]').map(Number)),
+  new Set(JSON.parse(getMigratedItem(NOTIFIED_KEY) || '[]').map(Number)),
 );
 
 function saveNotifiedIds() {

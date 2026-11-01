@@ -37,7 +37,7 @@ interface CalendarEvent {
 }
 
 const loading = ref(false);
-const CALENDAR_CACHE_KEY = 'nexus.calendar.events.v1';
+const CALENDAR_CACHE_KEY = 'wolfnas.calendar.events.v1';
 const allEvents = ref<CalendarEvent[]>([]);
 
 function readCachedCalendarEvents(): CalendarEvent[] {

@@ -23,6 +23,7 @@ import {
 } from '#/api/modules/agent';
 import { $t } from '#/locales';
 import { useAuthStore } from '#/store';
+import { getMigratedItem } from '#/utils/legacy-storage';
 import { useAppNotification } from '#/utils/notify';
 import {
   canOsNotify,
@@ -51,11 +52,11 @@ let notifyTimer: null | ReturnType<typeof setInterval> = null;
 const showDot = computed(() => unreadCount.value > 0);
 
 // OS 通知去重集合（与消息中心共用 localStorage，防重放/重复弹）
-const NOTIFIED_KEY = 'nexus-agent-notified-ids';
+const NOTIFIED_KEY = 'wolfnas-agent-notified-ids';
 const notifiedIds: Set<number> = (() => {
   try {
     return new Set(
-      JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '[]').map(Number),
+      JSON.parse(getMigratedItem(NOTIFIED_KEY) || '[]').map(Number),
     );
   } catch {
     return new Set();
@@ -197,7 +198,7 @@ function scheduleLoadNotifications() {
 }
 
 // 布局 SSE 消息流：新消息实时刷新铃铛/下拉 + 提示音（消息中心页暂停，由其自身流接管）
-const LAYOUT_CURSOR_KEY = 'nexus-layout-stream-cursor';
+const LAYOUT_CURSOR_KEY = 'wolfnas-layout-stream-cursor';
 let layoutStreamAbort: AbortController | null = null;
 let layoutStreamCursor = 0;
 let layoutStreamBackoff = 3000;

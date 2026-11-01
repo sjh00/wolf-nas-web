@@ -18,8 +18,8 @@ export namespace BrowserFingerprintApi {
   }
 
   // localStorage 节流键：指纹哈希 + 最近同步时间（v2：强制真实浏览器重新同步一次）
-  const LAST_HASH_KEY = 'nexus-media:last-fp-hash:v2';
-  const LAST_TS_KEY = 'nexus-media:last-fp-ts:v2';
+  const LAST_HASH_KEY = 'wolfnas:last-fp-hash:v2';
+  const LAST_TS_KEY = 'wolfnas:last-fp-ts:v2';
   // 同指纹 1 小时内不重复同步
   const THROTTLE_MS = 60 * 60 * 1000;
 
