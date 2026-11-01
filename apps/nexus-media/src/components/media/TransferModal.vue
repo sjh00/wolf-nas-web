@@ -6,6 +6,7 @@ import { IconifyIcon } from '@vben/icons';
 import {
   NButton,
   NCard,
+  NDivider,
   NEmpty,
   NForm,
   NFormItem,
@@ -22,7 +23,7 @@ import {
 import { searchMediaApi } from '#/api/modules/media';
 import { getStorageBackendsApi } from '#/api/modules/storage';
 import { SYNC_MODES } from '#/api/modules/sync';
-import { getImgUrl } from '#/utils/image';
+import MediaPoster from '#/components/media/MediaPoster.vue';
 
 import PathPickerModal from './PathPickerModal.vue';
 
@@ -33,6 +34,10 @@ export interface TransferFormData {
   type: string;
   tmdb?: number;
   season?: number;
+  episode_format?: string;
+  episode_details?: string;
+  episode_part?: string;
+  episode_offset?: string;
   min_filesize?: number;
   src_backend_id?: string;
   dst_backend_id?: string;
@@ -58,6 +63,11 @@ const form = ref<TransferFormData>({
   outpath: '',
   syncmod: 'copy',
   type: 'movie',
+  season: undefined,
+  episode_format: '',
+  episode_details: '',
+  episode_part: '',
+  episode_offset: '',
 });
 
 watch(
@@ -71,6 +81,10 @@ watch(
         type: props.type || 'movie',
         tmdb: undefined,
         season: undefined,
+        episode_format: '',
+        episode_details: '',
+        episode_part: '',
+        episode_offset: '',
         min_filesize: undefined,
         src_backend_id: props.srcBackendId || 'local',
         dst_backend_id: 'local',
@@ -162,6 +176,15 @@ async function handleTmdbSearch() {
 
 function selectTmdbMedia(media: any) {
   form.value.tmdb = media.id || media.tmdb_id || undefined;
+  // 选中结果时同步媒体类型（此前不同步，电视剧/动漫会按默认“电影”查询导致查不到 TMDB）
+  const t = String(media.media_type || media.type || '').toLowerCase();
+  if (t === 'anime' || t === '动漫') {
+    form.value.type = 'anime';
+  } else if (t === 'tv' || t === '剧集' || t === '电视剧') {
+    form.value.type = 'tv';
+  } else if (t === 'movie' || t === '电影') {
+    form.value.type = 'movie';
+  }
   tmdbSearchShow.value = false;
   tmdbSearchResults.value = [];
 }
@@ -272,6 +295,51 @@ function selectTmdbMedia(media: any) {
             </NButton>
           </NSpace>
         </NFormItem>
+        <template v-if="form.type !== 'movie'">
+          <NDivider style="margin: 0.5rem 0">季集设置</NDivider>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <NFormItem label="季">
+              <NInputNumber
+                v-model:value="form.season"
+                placeholder="如 1"
+                :min="1"
+                :show-button="false"
+                clearable
+                size="small"
+              />
+            </NFormItem>
+            <NFormItem label="指定集数">
+              <NInput
+                v-model:value="form.episode_format"
+                placeholder="如 1,2,3"
+                size="small"
+              />
+            </NFormItem>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <NFormItem label="定位集数">
+              <NInput
+                v-model:value="form.episode_details"
+                placeholder="如 E01"
+                size="small"
+              />
+            </NFormItem>
+            <NFormItem label="集数偏移">
+              <NInput
+                v-model:value="form.episode_offset"
+                placeholder="如 -10"
+                size="small"
+              />
+            </NFormItem>
+          </div>
+          <NFormItem label="指定 Part">
+            <NInput
+              v-model:value="form.episode_part"
+              placeholder="如 Part1"
+              size="small"
+            />
+          </NFormItem>
+        </template>
         <NFormItem label="过滤大小">
           <NInputNumber
             v-model:value="form.min_filesize"
@@ -340,14 +408,12 @@ function selectTmdbMedia(media: any) {
               @click="selectTmdbMedia(media)"
             >
               <div class="flex gap-3">
-                <img
+                <MediaPoster
                   v-if="media.image || media.poster"
-                  :src="getImgUrl(media.image || media.poster)"
+                  :src="media.image || media.poster"
+                  :content-profile="media.content_profile"
                   class="tmdb-poster rounded"
                   alt=""
-                  @error="
-                    (e: any) => (e.target.src = '/static/img/no-image.png')
-                  "
                 />
                 <div
                   v-else

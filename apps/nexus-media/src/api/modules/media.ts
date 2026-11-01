@@ -30,6 +30,11 @@ export namespace MediaApi {
       cast: Array<{ character?: string; name: string; profile_path?: string }>;
       crew: Array<{ job?: string; name: string }>;
     };
+    actor_profiles?: Array<{
+      aliases?: string[];
+      image_url?: string;
+      name: string;
+    }>;
   }
 
   export interface RecommendParams {
@@ -40,6 +45,102 @@ export namespace MediaApi {
     tmdbid?: number;
     params?: Record<string, any>;
   }
+  export interface MediaServerOption {
+    id: number;
+    name: string;
+    type: string;
+    is_default: boolean;
+  }
+
+  export interface LibrarySection {
+    server: MediaServerOption;
+    server_id: number;
+    server_name: string;
+    server_success: boolean;
+    sync_state: string;
+    media_counts: Record<string, number | string>;
+    librarys: Record<string, any>[];
+    resumes: Record<string, any>[];
+    latests: Record<string, any>[];
+    activitys: Record<string, any>[];
+  }
+
+  export interface LibraryHome {
+    server_success: boolean;
+    servers: MediaServerOption[];
+    sections: LibrarySection[];
+    media_counts: Record<string, number | string>;
+    user_count: number;
+    library_spaces: Record<string, any>;
+    librarys: Record<string, any>[];
+    resumes: Record<string, any>[];
+    latests: Record<string, any>[];
+    activitys: Record<string, any>[];
+  }
+
+  export interface LibraryRoute {
+    id?: number;
+    content_profile: string;
+    target_path?: null | string;
+    server_id: number;
+    server_name?: string;
+    backend_id?: string;
+    library_id?: null | string;
+    enabled: boolean;
+    note?: string;
+  }
+}
+
+/** 获取启用的媒体服务器实例 */
+export async function getLibraryServersApi() {
+  return requestClient.post<MediaApi.MediaServerOption[]>(
+    '/media/library/servers',
+    {},
+  );
+}
+
+/** 获取指定实例的媒体库列表 */
+export async function getMediaLibrariesApi(serverId?: number) {
+  return requestClient.post<Record<string, any>[]>('/media/library/libraries', {
+    server_id: serverId,
+  });
+}
+
+/** 同步指定实例的媒体库 */
+export async function syncMediaLibrariesApi(params: {
+  server_id: number;
+  librarys: string[];
+}) {
+  return requestClient.post('/media/sync/start', params);
+}
+
+/** 通知指定实例扫描媒体库 */
+export async function refreshMediaLibraryApi(serverId: number) {
+  return requestClient.post('/media/library/refresh', {
+    server_id: serverId,
+  });
+}
+
+/** 获取内容画像媒体库路由 */
+export async function getLibraryRoutesApi() {
+  return requestClient.post<MediaApi.LibraryRoute[]>(
+    '/media/library/routes',
+    {},
+  );
+}
+
+/** 保存内容画像媒体库路由 */
+export async function saveLibraryRouteApi(data: MediaApi.LibraryRoute) {
+  const updating = Boolean(data.id);
+  return requestClient.post<MediaApi.LibraryRoute>(
+    updating ? '/media/library/routes/update' : '/media/library/routes/save',
+    data,
+  );
+}
+
+/** 删除内容画像媒体库路由 */
+export async function deleteLibraryRouteApi(id: number) {
+  return requestClient.post('/media/library/routes/delete', { id });
 }
 
 /** 搜索媒体 */
@@ -53,6 +154,26 @@ export async function searchMediaApi(params: MediaApi.SearchParams) {
   );
 }
 
+/** 按内容画像搜索元数据（插件 provider） */
+export async function searchMetadataApi(params: {
+  content_profile: string;
+  limit?: number;
+  provider?: string;
+  query: string;
+}) {
+  return requestClient.post<Record<string, any>[]>(
+    '/media/metadata/search',
+    params,
+  );
+}
+
+/** 获取可搜索的元数据来源（动态） */
+export async function getMetadataProvidersApi() {
+  return requestClient.get<Record<string, any>[]>(
+    '/media/providers?include_health=false',
+  );
+}
+
 /** 获取媒体详情 */
 export async function getMediaDetailApi(tmdbid: number | string, type: string) {
   return requestClient.post<MediaApi.MediaDetail>('/media/detail', {
@@ -61,11 +182,27 @@ export async function getMediaDetailApi(tmdbid: number | string, type: string) {
   });
 }
 
+export async function getMediaDetailByRefApi(
+  provider: string,
+  externalId: string,
+  mediaType?: string,
+  contentProfile?: string,
+  contentId?: string,
+) {
+  return requestClient.post<Record<string, any>>('/media/detail_by_ref', {
+    provider,
+    external_id: externalId,
+    media_type: mediaType,
+    content_profile: contentProfile || undefined,
+    content_id: contentId || undefined,
+  });
+}
+
 /** 获取媒体库首页数据（libraries/resumes/latests/stats） */
-export async function getLibraryHomeApi() {
-  return requestClient.post<Record<string, any>>(
+export async function getLibraryHomeApi(serverId?: number) {
+  return requestClient.post<MediaApi.LibraryHome>(
     '/media/library/home',
-    {},
+    { server_id: serverId },
     { timeout: 120_000 },
   );
 }
@@ -278,13 +415,42 @@ export interface TransferHistoryItem {
   DEST_PATH: string;
   DEST_FILENAME: string;
   DST_BACKEND?: string;
+  POSTER?: null | string;
   image?: string;
+  IDENTITY_ID?: null | string;
+  ANCHOR_PROVIDER?: null | string;
+  ANCHOR_EXTERNAL_ID?: null | string;
   DATE: string;
   SYNC_MODE?: string;
   RMT_MODE?: string;
   SEEDS_SEASON?: number;
   SEEDS_EPISODE?: number;
   SEEDS_END_EPISODE?: number;
+  CONTENT_PROFILE?: string;
+  SOURCE_STATE?: HistoryFileState;
+  SOURCE_DELETED_AT?: null | string;
+  DEST_STATE?: HistoryFileState;
+  DEST_DELETED_AT?: null | string;
+  FILES_CHECKED_AT?: null | string;
+  CAPABILITIES?: HistoryCapabilities;
+}
+
+export type HistoryFileState = 'deleted' | 'missing' | 'present' | 'unknown';
+
+export interface HistoryCapabilities {
+  delete_library: boolean;
+  delete_record: boolean;
+  delete_source: boolean;
+  manual_identify: boolean;
+  reidentify: boolean;
+}
+
+export interface HistoryActionResult {
+  id: number;
+  message?: string;
+  state?: HistoryFileState;
+  status: 'deleted' | 'failed' | 'skipped';
+  target?: 'library' | 'source' | null;
 }
 
 export interface TransferHistoryPageResult {
@@ -382,6 +548,7 @@ export async function getTransferHistoryApi(params: {
   keyword?: string;
   page?: number;
   pagenum?: number;
+  type?: string;
 }) {
   return requestClient.post<TransferHistoryPageResult>(
     '/media/transfer/history',
@@ -394,6 +561,34 @@ export async function getTransferStatisticsApi(days?: number) {
   return requestClient.post<TransferStatisticsResult>(
     '/media/transfer/statistics',
     { days },
+  );
+}
+
+/** 删除识别记录（不删除任何文件） */
+export async function deleteHistoryRecordsApi(ids: number[]) {
+  return requestClient.post<{
+    deleted: number;
+    results: HistoryActionResult[];
+    total: number;
+  }>('/media/history/records/delete', { ids });
+}
+
+/** 删除识别记录关联文件（记录保留） */
+export async function deleteHistoryFilesApi(
+  ids: number[],
+  targets: Array<'library' | 'source'>,
+) {
+  return requestClient.post<{ results: HistoryActionResult[] }>(
+    '/media/history/files/delete',
+    { ids, targets },
+  );
+}
+
+/** 检测识别记录关联文件状态 */
+export async function checkHistoryFilesApi(ids: number[]) {
+  return requestClient.post<{ results: HistoryActionResult[] }>(
+    '/media/history/files/check',
+    { ids },
   );
 }
 
@@ -542,18 +737,50 @@ export async function clearTmdbBlacklistApi() {
 
 // ---------- 分类配置 ----------
 
+export interface CategoryRule {
+  field: string;
+  operator: string;
+  value: string | string[];
+  source?: null | string;
+}
+
 export interface CategoryConfigItem {
   id?: number;
   media_type: string;
   name: string;
   sort_order: number;
   is_default: boolean;
-  rules: Record<string, string>;
+  enabled?: boolean;
+  rules: CategoryRule[] | Record<string, string>;
 }
 
 /** 获取分类配置 */
 export async function getCategoryConfigApi() {
   return requestClient.post<CategoryConfigItem[]>('/media/category/config', {});
+}
+
+/** 获取分类页标签（含插件动态标签） */
+export async function getCategoryTabsApi() {
+  return requestClient.get<
+    Array<{
+      key: string;
+      label: string;
+      namespace?: string;
+      categories?: Array<{ name: string; label: string; rules: any }>;
+    }>
+  >('/media/category/tabs');
+}
+
+/** 获取分类映射词表 */
+export async function getCategoryTaxonomyApi() {
+  return requestClient.get<{
+    genres: Record<string, any>;
+    languages: Record<string, any>;
+    countries: Record<string, any>;
+    fields: Array<{ key: string; label: string; type: string }>;
+    operators: string[];
+    sources: string[];
+  }>('/media/category/taxonomy');
 }
 
 /** 更新分类配置 */
@@ -797,7 +1024,19 @@ export async function getMediaLibraryConfigApi() {
     tv_path: string[];
     unknown_backend: string[];
     unknown_path: string[];
+    movie_layout: 'category' | 'flat';
+    tv_layout: 'category' | 'flat';
+    anime_layout: 'category' | 'flat';
   }>('/media/library/path');
+}
+
+/** 更新媒体库目录结构 */
+export async function updateMediaLibraryLayoutApi(payload: {
+  movie_layout: 'category' | 'flat';
+  tv_layout: 'category' | 'flat';
+  anime_layout: 'category' | 'flat';
+}) {
+  return requestClient.post('/media/library/layout', payload);
 }
 
 /** 添加媒体库路径 */
@@ -885,4 +1124,83 @@ export async function previewNameFormatApi(data: {
     segments: Record<string, string>;
     validate: NameFormatValidateResult;
   }>('/media/name_format/preview', data);
+}
+
+export namespace DiscoveryApi {
+  export interface Feed {
+    key: string;
+    title: string;
+    kind: string;
+    icon?: string;
+    facets: string[];
+    page_size: number;
+  }
+
+  export interface Source {
+    provider: string;
+    name: string;
+    visibility: 'private' | 'public';
+    feeds: Feed[];
+  }
+
+  export interface ItemRef {
+    provider: string;
+    external_id: string;
+    media_type?: string;
+    scope?: string;
+  }
+
+  export interface Item {
+    provider: string;
+    ref: ItemRef;
+    content_profile: string;
+    title: string;
+    original_title?: string;
+    year?: string;
+    poster?: string;
+    backdrop?: string;
+    rating: Record<string, number>;
+    tags: string[];
+    anchor_ref?: ItemRef;
+    actions: string[];
+    extra?: Record<string, any>;
+  }
+
+  export interface Page {
+    items: Item[];
+    page: number;
+    has_more: boolean;
+    facets?: Record<string, Array<{ label?: string; value: string }>>;
+    error?: null | string;
+    retryable?: boolean;
+  }
+}
+
+/** 获取探索页来源与 feed */
+export async function getDiscoveryProvidersApi() {
+  return requestClient.get<DiscoveryApi.Source[]>('/media/discovery/providers');
+}
+
+/** 获取探索 feed 内容 */
+export async function getDiscoveryItemsApi(params: {
+  provider: string;
+  feed: string;
+  page?: number;
+  filters?: Record<string, any>;
+}) {
+  return requestClient.post<DiscoveryApi.Page>('/media/discovery/items', {
+    page: 1,
+    filters: {},
+    ...params,
+  });
+}
+
+/** 按 provider ref 获取元数据详情（用于缺失海报兜底） */
+export async function lookupMetadataApi(data: {
+  allow_missing?: boolean;
+  external_id: string;
+  provider: string;
+  scope?: string;
+}) {
+  return requestClient.get<any>('/media/lookup', { params: data });
 }

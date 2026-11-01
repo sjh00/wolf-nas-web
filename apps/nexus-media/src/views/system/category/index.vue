@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -11,17 +11,19 @@ import {
   NSpace,
   NSpin,
   NSwitch,
-  NTabPane,
-  NTabs,
   NTag,
-  NTooltip,
   useMessage,
 } from 'naive-ui';
 
 import {
   type CategoryConfigItem,
+  type CategoryRule,
   getCategoryConfigApi,
+  getCategoryTabsApi,
+  getCategoryTaxonomyApi,
+  getMediaLibraryConfigApi,
   updateCategoryConfigApi,
+  updateMediaLibraryLayoutApi,
 } from '#/api/modules/media';
 import PageHeader from '#/components/page/PageHeader.vue';
 
@@ -31,251 +33,298 @@ interface TabDef {
   icon: string;
 }
 
-const TABS: TabDef[] = [
+interface PluginTab {
+  namespace: string;
+  fields: string[];
+  fieldLabels: Record<string, string>;
+  categories: Array<{ name: string; label: string; rules: unknown }>;
+}
+
+const DEFAULT_TABS: TabDef[] = [
   { key: 'movie', label: '电影', icon: 'lucide:film' },
   { key: 'tv', label: '电视剧', icon: 'lucide:tv' },
   { key: 'anime', label: '动漫', icon: 'lucide:sparkles' },
 ];
 
-const FIELD_OPTIONS = [
-  { label: '内容类型', value: 'genre_ids' },
-  { label: '语种', value: 'original_language' },
-  { label: '国家/地区', value: 'origin_country' },
-  { label: '制片国家', value: 'production_countries' },
-];
+const FIELD_LABELS: Record<string, string> = {
+  genre: '类型',
+  genre_ids: '类型',
+  original_language: '语言',
+  origin_country: '国家/地区',
+  production_countries: '制片国家',
+  country: '国家/地区',
+  tag: '标签',
+  content_profile: '内容画像',
+  provider: '来源',
+};
 
-const VALUE_OPTIONS: Record<string, { label: string; value: string }[]> = {
-  genre_ids: [
-    { label: '动画', value: '16' },
-    { label: '动作', value: '28' },
-    { label: '冒险', value: '12' },
-    { label: '喜剧', value: '35' },
-    { label: '犯罪', value: '80' },
-    { label: '纪录片', value: '99' },
-    { label: '剧情', value: '18' },
-    { label: '家庭', value: '10751' },
-    { label: '奇幻', value: '14' },
-    { label: '历史', value: '36' },
-    { label: '恐怖', value: '27' },
-    { label: '音乐', value: '10402' },
-    { label: '悬疑', value: '9648' },
-    { label: '爱情', value: '10749' },
-    { label: '科幻', value: '878' },
-    { label: '电视电影', value: '10770' },
-    { label: '惊悚', value: '53' },
-    { label: '战争', value: '10752' },
-    { label: '西部', value: '37' },
-    { label: '儿童', value: '10762' },
-    { label: '真人秀', value: '10764' },
-    { label: '脱口秀', value: '10767' },
-  ],
-  original_language: [
-    { label: '中文', value: 'zh' },
-    { label: '粤语', value: 'cn' },
-    { label: '英语', value: 'en' },
-    { label: '日语', value: 'ja' },
-    { label: '韩语 / 朝鲜语', value: 'ko' },
-    { label: '法语', value: 'fr' },
-    { label: '德语', value: 'de' },
-    { label: '西班牙语', value: 'es' },
-    { label: '意大利语', value: 'it' },
-    { label: '俄语', value: 'ru' },
-    { label: '葡萄牙语', value: 'pt' },
-    { label: '阿拉伯语', value: 'ar' },
-    { label: '印地语', value: 'hi' },
-    { label: '泰语', value: 'th' },
-    { label: '越南语', value: 'vi' },
-    { label: '藏语', value: 'bo' },
-    { label: '壮语', value: 'za' },
-    { label: '南非语', value: 'af' },
-    { label: '阿塞拜疆语', value: 'az' },
-    { label: '比利时语', value: 'be' },
-    { label: '保加利亚语', value: 'bg' },
-    { label: '加泰隆语', value: 'ca' },
-    { label: '捷克语', value: 'cs' },
-    { label: '威尔士语', value: 'cy' },
-    { label: '丹麦语', value: 'da' },
-    { label: '第维埃语', value: 'dv' },
-    { label: '希腊语', value: 'el' },
-    { label: '世界语', value: 'eo' },
-    { label: '爱沙尼亚语', value: 'et' },
-    { label: '巴士克语', value: 'eu' },
-    { label: '法斯语', value: 'fa' },
-    { label: '芬兰语', value: 'fi' },
-    { label: '法罗语', value: 'fo' },
-    { label: '加里西亚语', value: 'gl' },
-    { label: '古吉拉特语', value: 'gu' },
-    { label: '希伯来语', value: 'he' },
-    { label: '克罗地亚语', value: 'hr' },
-    { label: '匈牙利语', value: 'hu' },
-    { label: '亚美尼亚语', value: 'hy' },
-    { label: '印度尼西亚语', value: 'id' },
-    { label: '冰岛语', value: 'is' },
-    { label: '格鲁吉亚语', value: 'ka' },
-    { label: '哈萨克语', value: 'kk' },
-    { label: '卡纳拉语', value: 'kn' },
-    { label: '孔卡尼语', value: 'kok' },
-    { label: '吉尔吉斯语', value: 'ky' },
-    { label: '立陶宛语', value: 'lt' },
-    { label: '拉脱维亚语', value: 'lv' },
-    { label: '毛利语', value: 'mi' },
-    { label: '马其顿语', value: 'mk' },
-    { label: '蒙古语', value: 'mn' },
-    { label: '马拉地语', value: 'mr' },
-    { label: '马来语', value: 'ms' },
-    { label: '马耳他语', value: 'mt' },
-    { label: '挪威语(伯克梅尔)', value: 'nb' },
-    { label: '荷兰语', value: 'nl' },
-    { label: '北梭托语', value: 'ns' },
-    { label: '旁遮普语', value: 'pa' },
-    { label: '波兰语', value: 'pl' },
-    { label: '克丘亚语', value: 'qu' },
-    { label: '罗马尼亚语', value: 'ro' },
-    { label: '梵文', value: 'sa' },
-    { label: '北萨摩斯语', value: 'se' },
-    { label: '斯洛伐克语', value: 'sk' },
-    { label: '斯洛文尼亚语', value: 'sl' },
-    { label: '阿尔巴尼亚语', value: 'sq' },
-    { label: '瑞典语', value: 'sv' },
-    { label: '斯瓦希里语', value: 'sw' },
-    { label: '叙利亚语', value: 'syr' },
-    { label: '泰米尔语', value: 'ta' },
-    { label: '泰卢固语', value: 'te' },
-    { label: '塔加路语', value: 'tl' },
-    { label: '茨瓦纳语', value: 'tn' },
-    { label: '土耳其语', value: 'tr' },
-    { label: '宗加语', value: 'ts' },
-    { label: '鞑靼语', value: 'tt' },
-    { label: '乌克兰语', value: 'uk' },
-    { label: '乌都语', value: 'ur' },
-    { label: '乌兹别克语', value: 'uz' },
-    { label: '班图语', value: 'xh' },
-    { label: '祖鲁语', value: 'zu' },
-  ],
-  origin_country: [
-    { label: '中国', value: 'CN' },
-    { label: '美国', value: 'US' },
-    { label: '日本', value: 'JP' },
-    { label: '韩国 / 南朝鲜', value: 'KR' },
-    { label: '朝鲜 / 北朝鲜', value: 'KP' },
-    { label: '英国(GB)', value: 'GB' },
-    { label: '英国(UK, 兼容)', value: 'UK' },
-    { label: '法国', value: 'FR' },
-    { label: '德国', value: 'DE' },
-    { label: '印度', value: 'IN' },
-    { label: '泰国', value: 'TH' },
-    { label: '俄罗斯', value: 'RU' },
-    { label: '意大利', value: 'IT' },
-    { label: '西班牙', value: 'ES' },
-    { label: '加拿大', value: 'CA' },
-    { label: '澳大利亚', value: 'AU' },
-    { label: '巴西', value: 'BR' },
-    { label: '墨西哥', value: 'MX' },
-    { label: '中国台湾', value: 'TW' },
-    { label: '中国香港', value: 'HK' },
-    { label: '阿根廷', value: 'AR' },
-    { label: '比利时', value: 'BE' },
-    { label: '瑞士', value: 'CH' },
-    { label: '智利', value: 'CL' },
-    { label: '哥伦比亚', value: 'CO' },
-    { label: '捷克', value: 'CZ' },
-    { label: '丹麦', value: 'DK' },
-    { label: '埃及', value: 'EG' },
-    { label: '希腊', value: 'GR' },
-    { label: '以色列', value: 'IL' },
-    { label: '伊拉克', value: 'IQ' },
-    { label: '伊朗', value: 'IR' },
-    { label: '缅甸', value: 'MM' },
-    { label: '澳门', value: 'MO' },
-    { label: '马来西亚', value: 'MY' },
-    { label: '荷兰', value: 'NL' },
-    { label: '挪威', value: 'NO' },
-    { label: '菲律宾', value: 'PH' },
-    { label: '巴基斯坦', value: 'PK' },
-    { label: '波兰', value: 'PL' },
-    { label: '葡萄牙', value: 'PT' },
-    { label: '沙特阿拉伯', value: 'SA' },
-    { label: '新加坡', value: 'SG' },
-    { label: '瑞典', value: 'SE' },
-    { label: '土耳其', value: 'TR' },
-    { label: '越南', value: 'VN' },
-    { label: '新西兰', value: 'NZ' },
-    { label: '老挝', value: 'LA' },
-    { label: '蒙古', value: 'MN' },
-  ],
-  production_countries: [
-    { label: '中国', value: 'CN' },
-    { label: '美国', value: 'US' },
-    { label: '日本', value: 'JP' },
-    { label: '韩国 / 南朝鲜', value: 'KR' },
-    { label: '朝鲜 / 北朝鲜', value: 'KP' },
-    { label: '英国(GB)', value: 'GB' },
-    { label: '英国(UK, 兼容)', value: 'UK' },
-    { label: '法国', value: 'FR' },
-    { label: '德国', value: 'DE' },
-    { label: '印度', value: 'IN' },
-    { label: '泰国', value: 'TH' },
-    { label: '俄罗斯', value: 'RU' },
-    { label: '意大利', value: 'IT' },
-    { label: '西班牙', value: 'ES' },
-    { label: '加拿大', value: 'CA' },
-    { label: '澳大利亚', value: 'AU' },
-    { label: '巴西', value: 'BR' },
-    { label: '墨西哥', value: 'MX' },
-    { label: '中国台湾', value: 'TW' },
-    { label: '中国香港', value: 'HK' },
-    { label: '阿根廷', value: 'AR' },
-    { label: '比利时', value: 'BE' },
-    { label: '瑞士', value: 'CH' },
-    { label: '智利', value: 'CL' },
-    { label: '哥伦比亚', value: 'CO' },
-    { label: '捷克', value: 'CZ' },
-    { label: '丹麦', value: 'DK' },
-    { label: '埃及', value: 'EG' },
-    { label: '希腊', value: 'GR' },
-    { label: '以色列', value: 'IL' },
-    { label: '伊拉克', value: 'IQ' },
-    { label: '伊朗', value: 'IR' },
-    { label: '缅甸', value: 'MM' },
-    { label: '澳门', value: 'MO' },
-    { label: '马来西亚', value: 'MY' },
-    { label: '荷兰', value: 'NL' },
-    { label: '挪威', value: 'NO' },
-    { label: '菲律宾', value: 'PH' },
-    { label: '巴基斯坦', value: 'PK' },
-    { label: '波兰', value: 'PL' },
-    { label: '葡萄牙', value: 'PT' },
-    { label: '沙特阿拉伯', value: 'SA' },
-    { label: '新加坡', value: 'SG' },
-    { label: '瑞典', value: 'SE' },
-    { label: '土耳其', value: 'TR' },
-    { label: '越南', value: 'VN' },
-    { label: '新西兰', value: 'NZ' },
-    { label: '老挝', value: 'LA' },
-    { label: '蒙古', value: 'MN' },
-  ],
+const OPERATOR_LABELS: Record<string, string> = {
+  eq: '等于',
+  neq: '不等于',
+  in: '属于',
+  not_in: '不属于',
+  contains: '包含',
+  contains_any: '包含任意',
+  startswith_any: '前缀匹配',
+  regex: '正则匹配',
+  exists: '存在',
 };
 
 const message = useMessage();
 const loading = ref(false);
 const saving = ref(false);
-const items = ref<CategoryConfigItem[]>([]);
+const taxonomy = ref<any>(null);
+const tabs = ref<TabDef[]>(DEFAULT_TABS);
+const pluginTabs = ref<Record<string, PluginTab>>({});
 const activeTab = ref('movie');
-
-const filteredItems = computed(() => {
-  return items.value
-    .filter((i) => i.media_type === activeTab.value)
-    .toSorted((a, b) => a.sort_order - b.sort_order);
+const items = ref<CategoryConfigItem[]>([]);
+const selected = ref<CategoryConfigItem | null>(null);
+const layouts = ref({
+  movie: 'category' as 'category' | 'flat',
+  tv: 'category' as 'category' | 'flat',
+  anime: 'flat' as 'category' | 'flat',
 });
+
+const activePluginTab = computed(() => pluginTabs.value[activeTab.value]);
+
+const filteredItems = computed(() =>
+  items.value
+    .filter((item) => item.media_type === activeTab.value)
+    .toSorted((a, b) => a.sort_order - b.sort_order),
+);
+
+const fieldOptions = computed(() => {
+  const pluginFields = (activePluginTab.value?.fields || []).map((key) => ({
+    label:
+      activePluginTab.value?.fieldLabels?.[key] ||
+      FIELD_LABELS[key.split('.').pop() || ''] ||
+      key.split('.').pop() ||
+      key,
+    value: key,
+  }));
+  const taxonomyFields = (taxonomy.value?.fields || []).map((item: any) => ({
+    label: item.label || FIELD_LABELS[item.key] || item.key,
+    value: item.key,
+  }));
+  if (taxonomyFields.length > 0) return [...pluginFields, ...taxonomyFields];
+  return [
+    ...pluginFields,
+    { label: '类型', value: 'genre' },
+    { label: '语言', value: 'original_language' },
+    { label: '国家/地区', value: 'country' },
+    { label: '标签', value: 'tag' },
+    { label: '内容画像', value: 'content_profile' },
+    { label: '来源', value: 'provider' },
+  ];
+});
+
+const operatorOptions = computed(() => {
+  const values = taxonomy.value?.operators || [
+    'eq',
+    'neq',
+    'in',
+    'not_in',
+    'contains',
+    'contains_any',
+    'startswith_any',
+    'regex',
+    'exists',
+  ];
+  return values.map((value: string) => ({
+    label: OPERATOR_LABELS[value] || value,
+    value,
+  }));
+});
+
+const sourceOptions = computed(() =>
+  (taxonomy.value?.sources || ['*', 'tmdb', 'douban', 'bangumi']).map(
+    (value: string) => ({
+      label: value === '*' ? '所有来源' : value,
+      value,
+    }),
+  ),
+);
+
+const selectedRules = computed(() => ruleList(selected.value?.rules));
+
+function ruleList(
+  rules: CategoryConfigItem['rules'] | undefined,
+): CategoryRule[] {
+  if (Array.isArray(rules)) return rules as CategoryRule[];
+  return Object.entries(rules || {}).map(([field, value]) => {
+    const normalizedField =
+      field === 'genres' || field === 'genre_ids'
+        ? 'genre'
+        : field === 'origin_country' || field === 'production_countries'
+          ? 'country'
+          : field;
+    return {
+      field: normalizedField,
+      operator:
+        normalizedField === 'original_language' || normalizedField === 'country'
+          ? 'in'
+          : 'contains_any',
+      value: String(value)
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    };
+  });
+}
+
+function mapValue(field: string, value: string): string {
+  const raw = String(value);
+  const lower = raw.toLowerCase();
+  const genres = taxonomy.value?.genres || {};
+  if (field === 'genre') {
+    for (const [key, item] of Object.entries(genres) as [string, any][]) {
+      const ids = [...(item.tmdb?.movie || []), ...(item.tmdb?.tv || [])].map(
+        String,
+      );
+      if (ids.includes(raw)) return key;
+    }
+  }
+  const source =
+    field === 'original_language'
+      ? taxonomy.value?.languages
+      : field === 'country'
+        ? taxonomy.value?.countries
+        : null;
+  if (source) {
+    for (const [key, item] of Object.entries(source) as [string, any][]) {
+      const aliases = [key, ...(item.aliases || [])].map((v) =>
+        String(v).toLowerCase(),
+      );
+      if (aliases.includes(lower)) return key;
+    }
+  }
+  return raw;
+}
+
+function normalizeRules(list: CategoryConfigItem[]) {
+  for (const item of list) {
+    item.rules = ruleList(item.rules).map((rule) => ({
+      ...rule,
+      value: Array.isArray(rule.value)
+        ? rule.value.map((value) => mapValue(rule.field, String(value)))
+        : mapValue(rule.field, String(rule.value)),
+    }));
+  }
+}
+
+function valueOptions(field: string) {
+  const source =
+    field === 'genre'
+      ? taxonomy.value?.genres
+      : field === 'original_language'
+        ? taxonomy.value?.languages
+        : field === 'country'
+          ? taxonomy.value?.countries
+          : null;
+  if (!source) return [];
+  return Object.entries(source).map(([value, item]: [string, any]) => ({
+    label: item?.labels?.zh || item?.labels?.en || value,
+    value,
+  }));
+}
+
+function valueLabel(field: string, value: string): string {
+  return (
+    valueOptions(field).find((item) => item.value === value)?.label || value
+  );
+}
+
+function fieldLabel(field: string): string {
+  return (
+    activePluginTab.value?.fieldLabels?.[field] ||
+    FIELD_LABELS[field] ||
+    FIELD_LABELS[field.split('.').pop() || ''] ||
+    field.split('.').pop() ||
+    field
+  );
+}
+
+function ruleSummary(): string {
+  const rules = selectedRules.value;
+  if (rules.length === 0) return '未设置条件，此分类不会自动命中。';
+  const clauses = rules.map((rule) => {
+    const field = fieldLabel(rule.field);
+    const operator = OPERATOR_LABELS[rule.operator] || rule.operator;
+    if (rule.operator === 'exists') return `${field} 存在`;
+    const values = Array.isArray(rule.value) ? rule.value : [rule.value];
+    const text = values
+      .filter((value) => value !== '')
+      .map((value) => valueLabel(rule.field, String(value)))
+      .join('、');
+    return `${field} ${operator} ${text || '未填写'}`;
+  });
+  return `当 ${clauses.join('，且 ')} 时命中。`;
+}
+
+function selectFirst() {
+  selected.value = filteredItems.value[0] || null;
+}
 
 async function fetch() {
   loading.value = true;
   try {
-    const res = await getCategoryConfigApi();
-    items.value = (res || []).map((i) => ({
-      ...i,
-      rules: i.rules || {},
+    const [config, tax, tabPayload, libraryConfig] = await Promise.all([
+      getCategoryConfigApi(),
+      getCategoryTaxonomyApi(),
+      getCategoryTabsApi(),
+      getMediaLibraryConfigApi(),
+    ]);
+    taxonomy.value = tax;
+    layouts.value = {
+      movie: libraryConfig.movie_layout || 'category',
+      tv: libraryConfig.tv_layout || 'category',
+      anime: libraryConfig.anime_layout || 'flat',
+    };
+    tabs.value = (tabPayload || []).map((tab: any) => ({
+      key: tab.key,
+      label: tab.label,
+      icon:
+        DEFAULT_TABS.find((item) => item.key === tab.key)?.icon ||
+        'lucide:layers',
     }));
+    pluginTabs.value = Object.fromEntries(
+      (tabPayload || [])
+        .filter((tab: any) => tab.namespace)
+        .map((tab: any) => [
+          tab.key,
+          {
+            namespace: tab.namespace,
+            fields: tab.fields || [],
+            fieldLabels: tab.field_labels || {},
+            categories: tab.categories || [],
+          },
+        ]),
+    );
+    items.value = (config || []).map((item) => ({
+      ...item,
+      rules: ruleList(item.rules),
+    }));
+    for (const tab of tabPayload || []) {
+      if (
+        !tab.namespace ||
+        items.value.some((item) => item.media_type === tab.key)
+      )
+        continue;
+      (tab.categories || []).forEach((category: any, index: number) => {
+        items.value.push({
+          media_type: tab.key,
+          name: category.label || category.name,
+          sort_order: index + 1,
+          is_default: false,
+          enabled: category.enabled !== false,
+          rules: ruleList(category.rules),
+        });
+      });
+    }
+    normalizeRules(items.value);
+    if (!tabs.value.some((tab) => tab.key === activeTab.value))
+      activeTab.value = 'movie';
+    selectFirst();
   } catch {
     message.error('加载分类配置失败');
   } finally {
@@ -284,130 +333,128 @@ async function fetch() {
 }
 
 function addCategory() {
-  const tabItems = items.value.filter((i) => i.media_type === activeTab.value);
-  const maxOrder = Math.max(0, ...tabItems.map((i) => i.sort_order));
-  items.value.push({
+  const maxOrder = Math.max(
+    0,
+    ...filteredItems.value.map((item) => item.sort_order),
+  );
+  const item: CategoryConfigItem = {
     media_type: activeTab.value,
-    name: '',
+    name: '新分类',
     sort_order: maxOrder + 1,
     is_default: false,
-    rules: {},
-  });
+    enabled: true,
+    rules: [],
+  };
+  items.value.push(item);
+  selected.value = item;
 }
 
-function removeCategory(indexInTab: number) {
+function removeCategory() {
+  if (!selected.value) return;
+  const index = items.value.indexOf(selected.value);
+  if (index >= 0) items.value.splice(index, 1);
+  selectFirst();
+}
+
+function moveCategory(offset: number) {
+  if (!selected.value) return;
   const list = filteredItems.value;
-  const target = list[indexInTab];
-  if (!target) return;
-  const globalIndex = items.value.findIndex(
-    (i) =>
-      i.media_type === target.media_type && i.sort_order === target.sort_order,
+  const index = list.indexOf(selected.value);
+  const target = index + offset;
+  if (target < 0 || target >= list.length) return;
+  const other = list[target];
+  if (!other) return;
+  const currentOrder = selected.value.sort_order;
+  selected.value.sort_order = other.sort_order;
+  other.sort_order = currentOrder;
+}
+
+function addRule() {
+  if (!selected.value) return;
+  selected.value.rules = [
+    ...selectedRules.value,
+    {
+      field: activePluginTab.value
+        ? activePluginTab.value.fields[0] || 'genre'
+        : 'genre',
+      operator: 'contains_any',
+      value: [],
+    },
+  ];
+}
+
+function updateRule(index: number, patch: Partial<CategoryRule>) {
+  if (!selected.value) return;
+  const rules = [...selectedRules.value];
+  rules[index] = { ...rules[index], ...patch } as CategoryRule;
+  selected.value.rules = rules;
+}
+
+function removeRule(index: number) {
+  if (!selected.value) return;
+  selected.value.rules = selectedRules.value.filter(
+    (_, current) => current !== index,
   );
-  if (globalIndex !== -1) {
-    items.value.splice(globalIndex, 1);
-  }
 }
 
-function moveUp(indexInTab: number) {
-  const list = filteredItems.value;
-  if (indexInTab <= 0) return;
-  const curr = list[indexInTab];
-  const prev = list[indexInTab - 1];
-  if (!curr || !prev) return;
-  const tmp = curr.sort_order;
-  curr.sort_order = prev.sort_order;
-  prev.sort_order = tmp;
-}
-
-function moveDown(indexInTab: number) {
-  const list = filteredItems.value;
-  if (indexInTab >= list.length - 1) return;
-  const curr = list[indexInTab];
-  const next = list[indexInTab + 1];
-  if (!curr || !next) return;
-  const tmp = curr.sort_order;
-  curr.sort_order = next.sort_order;
-  next.sort_order = tmp;
-}
-
-function addRule(item: CategoryConfigItem) {
-  const usedFields = Object.keys(item.rules);
-  const nextField =
-    FIELD_OPTIONS.find((f) => !usedFields.includes(f.value))?.value ||
-    'genre_ids';
-  item.rules = { ...item.rules, [nextField]: '' };
-}
-
-function updateRuleField(
-  item: CategoryConfigItem,
-  oldField: string,
-  newField: string,
-) {
-  const next = { ...item.rules };
-  delete next[oldField];
-  next[newField] = '';
-  item.rules = next;
-}
-
-function updateRuleValue(
-  item: CategoryConfigItem,
-  field: string,
-  values: string[],
-) {
-  item.rules = { ...item.rules, [field]: values.join(',') };
-}
-
-function removeRule(item: CategoryConfigItem, field: string) {
-  const next = { ...item.rules };
-  delete next[field];
-  item.rules = next;
-}
-
-function getRuleValues(_field: string, raw: string): string[] {
-  if (!raw) return [];
-  return raw
-    .split(',')
-    .map((v) => v.trim())
-    .filter((v) => v !== '');
+function updateRuleValue(index: number, value: string | string[]) {
+  updateRule(index, { value });
 }
 
 async function save() {
   saving.value = true;
   try {
-    const byType: Record<string, CategoryConfigItem[]> = {};
-    items.value.forEach((i) => {
-      const mt = i.media_type;
-      byType[mt] = byType[mt] || [];
-      byType[mt].push(i);
-    });
-    Object.values(byType).forEach((list) => {
+    const grouped = new Map<string, CategoryConfigItem[]>();
+    for (const item of items.value) {
+      const list = grouped.get(item.media_type) || [];
+      list.push(item);
+      grouped.set(item.media_type, list);
+    }
+    for (const list of grouped.values()) {
       list.sort((a, b) => a.sort_order - b.sort_order);
-      list.forEach((i, idx) => {
-        i.sort_order = idx + 1;
+      list.forEach((item, index) => {
+        item.sort_order = index + 1;
       });
-    });
-    await updateCategoryConfigApi(items.value);
-    message.success('保存成功');
+    }
+    await Promise.all([
+      updateCategoryConfigApi(items.value),
+      updateMediaLibraryLayoutApi({
+        movie_layout: layouts.value.movie,
+        tv_layout: layouts.value.tv,
+        anime_layout: layouts.value.anime,
+      }),
+    ]);
+    message.success('分类与目录结构已保存');
     await fetch();
   } catch {
-    message.error('保存失败');
+    message.error('保存分类配置失败');
   } finally {
     saving.value = false;
   }
 }
 
+watch(activeTab, selectFirst);
+watch(
+  filteredItems,
+  (list) => {
+    if (selected.value && list.includes(selected.value)) return;
+    selected.value = list[0] || null;
+  },
+  { deep: false },
+);
+
 onMounted(fetch);
 </script>
 
 <template>
-  <div class="p-4">
+  <div class="category-page">
     <PageHeader
       title="分类配置"
-      subtitle="配置电影、电视剧、动漫的二级分类策略"
+      subtitle="按顺序匹配分类规则；未命中任何规则的媒体归入默认分类。"
     >
       <template #actions>
         <NSpace>
-          <NButton size="small" @click="fetch">
+          <NButton size="small" :loading="loading" @click="fetch">
             <template #icon>
               <IconifyIcon icon="lucide:refresh-cw" class="h-4 w-4" />
             </template>
@@ -423,330 +470,679 @@ onMounted(fetch);
       </template>
     </PageHeader>
 
-    <!-- 说明提示 -->
-    <div
-      class="mb-4 flex items-start gap-2 rounded-lg hint-bar px-3 py-2 text-xs"
-    >
-      <IconifyIcon icon="lucide:info" class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>
-        系统按顺序匹配分类规则，首个匹配的分类将生效；未匹配任何规则的媒体归入「默认」分类。点击
-        <b>上移/下移</b>
-        调整优先级。
-      </span>
+    <div class="layout-panel">
+      <div class="layout-intro">
+        <div class="layout-title">目录结构</div>
+        <div class="layout-desc">
+          电影、电视剧默认分类子目录，动漫默认平铺；分类为空时回退平铺。
+        </div>
+      </div>
+      <div class="layout-actions">
+        <div
+          v-for="item in [
+            { key: 'movie', label: '电影', icon: 'lucide:film' },
+            { key: 'tv', label: '电视剧', icon: 'lucide:tv' },
+            { key: 'anime', label: '动漫', icon: 'lucide:sparkles' },
+          ]"
+          :key="item.key"
+          class="layout-group"
+        >
+          <div class="layout-label">
+            <IconifyIcon :icon="item.icon" class="h-3.5 w-3.5" />
+            {{ item.label }}
+          </div>
+          <div class="layout-segment">
+            <button
+              type="button"
+              class="layout-segment-item"
+              :class="[
+                layouts[item.key as keyof typeof layouts] === 'flat'
+                  ? 'is-active'
+                  : '',
+              ]"
+              @click="layouts[item.key as keyof typeof layouts] = 'flat'"
+            >
+              平铺
+            </button>
+            <button
+              type="button"
+              class="layout-segment-item"
+              :class="[
+                layouts[item.key as keyof typeof layouts] === 'category'
+                  ? 'is-active'
+                  : '',
+              ]"
+              @click="layouts[item.key as keyof typeof layouts] = 'category'"
+            >
+              分类子目录
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <NSpin :show="loading">
-      <NTabs v-model:value="activeTab" type="line">
-        <NTabPane
-          v-for="tab in TABS"
+      <div class="media-tabs">
+        <button
+          v-for="tab in tabs"
           :key="tab.key"
-          :name="tab.key"
-          :tab="tab.label"
+          type="button"
+          class="media-tab"
+          :class="[activeTab === tab.key ? 'is-active' : '']"
+          @click="activeTab = tab.key"
         >
-          <!-- 头部 -->
-          <div class="mb-3 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <IconifyIcon :icon="tab.icon" class="h-4 w-4 tab-icon" />
-              <span class="text-sm font-medium">{{ tab.label }}分类</span>
-              <NTag size="small" round>{{ filteredItems.length }}</NTag>
+          <IconifyIcon :icon="tab.icon" class="h-4 w-4" />
+          {{ tab.label }}
+        </button>
+      </div>
+
+      <div class="category-shell">
+        <aside class="category-rail">
+          <div class="rail-head">
+            <span>分类列表</span>
+            <NTag size="small" round>{{ filteredItems.length }}</NTag>
+          </div>
+          <div class="rail-list">
+            <button
+              v-for="item in filteredItems"
+              :key="`${item.media_type}-${item.sort_order}`"
+              type="button"
+              class="rail-item"
+              :class="[selected === item ? 'is-active' : '']"
+              @click="selected = item"
+            >
+              <span class="rail-order">{{ item.sort_order }}</span>
+              <span class="rail-name">{{ item.name || '未命名分类' }}</span>
+              <NTag v-if="item.is_default" size="tiny" round type="success">
+                默认
+              </NTag>
+              <NTag v-if="item.enabled === false" size="tiny" round>停用</NTag>
+            </button>
+            <NEmpty
+              v-if="filteredItems.length === 0"
+              description="暂无分类"
+              class="rail-empty"
+            />
+          </div>
+          <NButton dashed block size="small" @click="addCategory">
+            <template #icon>
+              <IconifyIcon icon="lucide:plus" class="h-3.5 w-3.5" />
+            </template>
+            新增分类
+          </NButton>
+        </aside>
+
+        <section v-if="selected" class="category-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <NInput
+                v-model:value="selected.name"
+                placeholder="分类名称"
+                class="name-input"
+              />
+              <label class="toggle-field">
+                <span>默认分类</span>
+                <NSwitch v-model:value="selected.is_default" size="small" />
+              </label>
+              <label class="toggle-field">
+                <span>启用</span>
+                <NSwitch v-model:value="selected.enabled" size="small" />
+              </label>
             </div>
-            <NButton size="small" type="primary" @click="addCategory">
-              <template #icon>
-                <IconifyIcon icon="lucide:plus" class="h-3.5 w-3.5" />
-              </template>
-              新增分类
-            </NButton>
+            <div class="panel-actions">
+              <NButton
+                size="tiny"
+                quaternary
+                :disabled="filteredItems[0] === selected"
+                @click="moveCategory(-1)"
+              >
+                上移
+              </NButton>
+              <NButton
+                size="tiny"
+                quaternary
+                :disabled="filteredItems.at(-1) === selected"
+                @click="moveCategory(1)"
+              >
+                下移
+              </NButton>
+              <NButton
+                size="tiny"
+                quaternary
+                type="error"
+                @click="removeCategory"
+              >
+                删除
+              </NButton>
+            </div>
           </div>
 
-          <!-- 分类卡片列表 -->
-          <div v-if="filteredItems.length > 0" class="category-list">
-            <div
-              v-for="(item, idx) in filteredItems"
-              :key="`${item.media_type}-${item.sort_order}`"
-              class="category-item"
-            >
-              <!-- 分类标题栏 -->
-              <div class="category-header">
-                <div class="flex items-center gap-2">
-                  <span class="sort-badge">{{ idx + 1 }}</span>
-                  <NInput
-                    v-model:value="item.name"
-                    placeholder="分类名称"
-                    size="small"
-                    class="name-input"
-                  />
-                  <NSwitch
-                    v-model:value="item.is_default"
-                    :checked-value="true"
-                    :unchecked-value="false"
-                  >
-                    <template #checked>默认</template>
-                    <template #unchecked>默认</template>
-                  </NSwitch>
-                </div>
+          <div v-if="selected.is_default" class="default-state">
+            <IconifyIcon icon="lucide:inbox" class="h-5 w-5" />
+            <div>
+              <div class="default-title">默认兜底分类</div>
+              <div class="default-desc">
+                未命中其他规则的媒体会自动归入此分类。
+              </div>
+            </div>
+          </div>
 
-                <div class="flex items-center gap-1">
-                  <NTooltip>
-                    <template #trigger>
-                      <NButton
-                        size="tiny"
-                        quaternary
-                        :disabled="idx === 0"
-                        @click="moveUp(idx)"
-                      >
-                        <template #icon>
-                          <IconifyIcon
-                            icon="lucide:arrow-up"
-                            class="h-3.5 w-3.5"
-                          />
-                        </template>
-                      </NButton>
-                    </template>
-                    上移
-                  </NTooltip>
-                  <NTooltip>
-                    <template #trigger>
-                      <NButton
-                        size="tiny"
-                        quaternary
-                        :disabled="idx === filteredItems.length - 1"
-                        @click="moveDown(idx)"
-                      >
-                        <template #icon>
-                          <IconifyIcon
-                            icon="lucide:arrow-down"
-                            class="h-3.5 w-3.5"
-                          />
-                        </template>
-                      </NButton>
-                    </template>
-                    下移
-                  </NTooltip>
-                  <NButton
-                    size="tiny"
-                    quaternary
-                    type="error"
-                    @click="removeCategory(idx)"
-                  >
-                    <template #icon>
-                      <IconifyIcon icon="lucide:trash-2" class="h-3.5 w-3.5" />
-                    </template>
-                  </NButton>
+          <template v-else>
+            <div class="rule-head">
+              <div>
+                <div class="section-title">匹配条件</div>
+                <div class="section-desc">
+                  多个条件同时成立时才命中；按列表顺序取第一个命中的分类。
                 </div>
               </div>
+              <NButton size="small" dashed @click="addRule">
+                <template #icon>
+                  <IconifyIcon icon="lucide:plus" class="h-3.5 w-3.5" />
+                </template>
+                添加条件
+              </NButton>
+            </div>
 
-              <!-- 默认分类提示 -->
-              <div v-if="item.is_default" class="default-tip">
-                不匹配任何规则的媒体将自动归入此类，无需配置匹配规则
-              </div>
-
-              <!-- 规则区域 -->
-              <div v-else class="rule-area">
-                <div
-                  v-for="(_, field) in item.rules"
-                  :key="field"
-                  class="rule-line"
-                >
-                  <div class="rule-label">当</div>
-
+            <div class="rule-list">
+              <div
+                v-for="(rule, index) in selectedRules"
+                :key="index"
+                class="rule-card"
+              >
+                <div class="rule-grid">
                   <NSelect
-                    :value="field"
-                    :options="FIELD_OPTIONS"
+                    :value="rule.field"
+                    :options="fieldOptions"
                     size="small"
-                    class="field-select"
+                    placeholder="字段"
                     @update:value="
-                      (v: string) => updateRuleField(item, field, v)
+                      (value: string) =>
+                        updateRule(index, { field: value, value: [] })
                     "
                   />
-
-                  <div class="rule-label">为以下任意值时</div>
-
                   <NSelect
-                    :value="getRuleValues(field, item.rules[field] || '')"
-                    :options="VALUE_OPTIONS[field] || []"
+                    :value="rule.operator"
+                    :options="operatorOptions"
+                    size="small"
+                    placeholder="操作符"
+                    @update:value="
+                      (value: string) => updateRule(index, { operator: value })
+                    "
+                  />
+                  <NSelect
+                    :value="rule.source || '*'"
+                    :options="sourceOptions"
+                    size="small"
+                    placeholder="来源"
+                    @update:value="
+                      (value: string) =>
+                        updateRule(index, {
+                          source: value === '*' ? null : value,
+                        })
+                    "
+                  />
+                  <NInput
+                    v-if="rule.operator === 'regex'"
+                    :value="String(rule.value || '')"
+                    size="small"
+                    placeholder="正则表达式"
+                    @update:value="
+                      (value: string) => updateRuleValue(index, value)
+                    "
+                  />
+                  <NSelect
+                    v-else-if="rule.operator !== 'exists'"
+                    :value="
+                      Array.isArray(rule.value)
+                        ? rule.value
+                        : [String(rule.value || '')]
+                    "
+                    :options="valueOptions(rule.field)"
                     size="small"
                     multiple
                     filterable
                     tag
-                    placeholder="请选择"
-                    class="value-select"
+                    placeholder="选择或输入值"
                     @update:value="
-                      (v: string[]) => updateRuleValue(item, field, v)
+                      (value: string[]) => updateRuleValue(index, value)
                     "
                   />
-
+                  <div v-else class="exists-placeholder">无需填写值</div>
                   <NButton
                     size="tiny"
-                    text
+                    quaternary
                     type="error"
-                    class="remove-btn"
-                    @click="removeRule(item, field)"
+                    class="rule-remove"
+                    @click="removeRule(index)"
                   >
                     <template #icon>
                       <IconifyIcon icon="lucide:x" class="h-3.5 w-3.5" />
                     </template>
                   </NButton>
                 </div>
-
-                <NButton
-                  v-if="Object.keys(item.rules).length < FIELD_OPTIONS.length"
-                  size="small"
-                  dashed
-                  class="add-rule-btn"
-                  @click="addRule(item)"
-                >
-                  <template #icon>
-                    <IconifyIcon icon="lucide:plus" class="h-3.5 w-3.5" />
-                  </template>
-                  添加匹配条件
-                </NButton>
+              </div>
+              <div v-if="selectedRules.length === 0" class="rule-empty">
+                还没有匹配条件。
               </div>
             </div>
-          </div>
 
-          <!-- 空状态 -->
-          <NEmpty v-else :description="`暂无${tab.label}分类`" class="py-8">
-            <template #icon>
-              <IconifyIcon
-                icon="lucide:folder-open"
-                class="h-10 w-10 empty-icon"
-              />
-            </template>
+            <div class="rule-preview">
+              <IconifyIcon icon="lucide:info" class="h-4 w-4" />
+              <span>{{ ruleSummary() }}</span>
+            </div>
+          </template>
+        </section>
+        <section v-else class="category-panel empty-panel">
+          <NEmpty description="选择一个分类开始配置">
             <template #extra>
-              <NButton size="small" @click="addCategory">
-                <template #icon>
-                  <IconifyIcon icon="lucide:plus" class="h-3.5 w-3.5" />
-                </template>
-                添加分类
-              </NButton>
+              <NButton size="small" @click="addCategory">新增分类</NButton>
             </template>
           </NEmpty>
-        </NTabPane>
-      </NTabs>
+        </section>
+      </div>
     </NSpin>
   </div>
 </template>
 
 <style scoped>
-.hint-bar {
+.category-page {
+  padding: 1rem;
+}
+
+.media-tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  margin-bottom: 0.85rem;
+  overflow-x: auto;
+  background: hsl(var(--accent) / 45%);
+  border-radius: 0.65rem;
+}
+
+.media-tab {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.42rem 0.85rem;
+  font: inherit;
+  font-size: 0.82rem;
   color: hsl(var(--muted-foreground));
-  background-color: hsl(var(--accent));
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 0.45rem;
+}
+
+.media-tab.is-active {
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 8%);
+}
+
+.category-shell {
+  display: grid;
+  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.category-rail,
+.category-panel {
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
+  border-radius: 0.8rem;
 }
 
-.tab-icon {
-  color: hsl(var(--muted-foreground));
-}
-
-.empty-icon {
-  color: hsl(var(--muted-foreground) / 50%);
-}
-
-.category-list {
+.category-rail {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.65rem;
+  padding: 0.6rem;
 }
 
-.category-item {
-  overflow: hidden;
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: 0.5rem;
-}
-
-.category-header {
+.rail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.625rem 0.875rem;
-  background-color: hsl(var(--accent) / 30%);
-  border-bottom: 1px solid hsl(var(--border));
+  padding: 0.25rem 0.35rem;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
 }
 
-.sort-badge {
+.rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.rail-item {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.5rem;
+  font: inherit;
+  font-size: 0.82rem;
+  color: hsl(var(--muted-foreground));
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+}
+
+.rail-item:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent) / 55%);
+}
+
+.rail-item.is-active {
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  box-shadow: inset 2px 0 0 hsl(var(--primary));
+}
+
+.rail-order {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.375rem;
-  height: 1.375rem;
-  padding: 0 0.35rem;
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: hsl(var(--primary-foreground));
-  background-color: hsl(var(--primary));
-  border-radius: 9999px;
-}
-
-.name-input {
-  width: 12rem;
-}
-
-.default-tip {
-  padding: 0.75rem 0.875rem;
-  font-size: 0.8rem;
+  min-width: 1.25rem;
+  font-size: 0.68rem;
   color: hsl(var(--muted-foreground));
 }
 
-.rule-area {
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
-  padding: 0.75rem 0.875rem;
-}
-
-.rule-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-  align-items: center;
-}
-
-.rule-label {
-  font-size: 0.8rem;
-  color: hsl(var(--muted-foreground));
+.rail-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.field-select {
-  width: 7.5rem;
+.rail-empty {
+  padding: 1rem 0;
 }
 
-.value-select {
-  flex: 1;
-  min-width: 14rem;
-  max-width: 24rem;
+.category-panel {
+  min-height: 0;
+  padding: 1rem;
 }
 
-.remove-btn {
-  margin-left: 0.25rem;
+.panel-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
-.add-rule-btn {
-  align-self: flex-start;
-  margin-top: 0.25rem;
+.panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
 }
 
-@media (max-width: 640px) {
-  .category-header {
-    flex-wrap: wrap;
-    gap: 0.5rem;
+.toggle-field {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.76rem;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--accent) / 35%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.45rem;
+}
+
+.name-input {
+  width: min(18rem, 55vw);
+}
+
+.panel-actions {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.default-state {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 1.25rem;
+  margin-top: 1rem;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--accent) / 35%);
+  border: 1px dashed hsl(var(--border));
+  border-radius: 0.6rem;
+}
+
+.default-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.default-desc {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.rule-head {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 1rem 0 0.75rem;
+}
+
+.section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.section-desc {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.rule-card {
+  padding: 0.55rem;
+  background: hsl(var(--accent) / 25%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.6rem;
+}
+
+.rule-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(7rem, 0.8fr) minmax(7rem, 0.8fr) minmax(6rem, 0.7fr)
+    minmax(12rem, 1.8fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.exists-placeholder {
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.rule-remove {
+  justify-self: end;
+}
+
+.rule-empty {
+  padding: 1rem;
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+  border: 1px dashed hsl(var(--border));
+  border-radius: 0.55rem;
+}
+
+.rule-preview {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.75rem;
+  margin-top: 0.85rem;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--primary) / 6%);
+  border: 1px solid hsl(var(--primary) / 20%);
+  border-radius: 0.55rem;
+}
+
+.empty-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 820px) {
+  .category-page {
+    padding: 0.7rem;
   }
 
-  .name-input {
-    width: 8rem;
+  .category-shell {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .rule-line {
+  .category-rail {
+    position: static;
+  }
+
+  .rail-list {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .rail-item {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .rail-empty {
+    width: 100%;
+  }
+
+  .panel-head {
     flex-direction: column;
-    gap: 0.375rem;
     align-items: flex-start;
   }
 
-  .field-select,
-  .value-select {
+  .name-input {
     width: 100%;
-    max-width: none;
+  }
+
+  .rule-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .rule-grid > :nth-child(3) {
+    grid-column: 1 / 3;
+  }
+
+  .rule-grid > :nth-child(4) {
+    grid-column: 1 / 4;
+  }
+
+  .rule-grid > :nth-child(5) {
+    grid-row: 1;
+    grid-column: 3;
+  }
+}
+
+.layout-panel {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.6fr);
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.75rem;
+}
+
+.layout-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.layout-desc {
+  max-width: 34ch;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: hsl(var(--muted-foreground));
+}
+
+.layout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.layout-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.layout-label {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.layout-segment {
+  display: inline-flex;
+  gap: 0.1rem;
+  padding: 0.2rem;
+  background: hsl(var(--accent) / 45%);
+  border-radius: 0.5rem;
+}
+
+.layout-segment-item {
+  padding: 0.32rem 0.6rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 0.35rem;
+}
+
+.layout-segment-item.is-active {
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 8%);
+}
+
+@media (max-width: 900px) {
+  .layout-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .layout-actions {
+    justify-content: flex-start;
   }
 }
 </style>
