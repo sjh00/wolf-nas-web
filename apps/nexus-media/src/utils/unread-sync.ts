@@ -8,7 +8,7 @@ let channel: BroadcastChannel | null = null;
 function getChannel(): BroadcastChannel | null {
   try {
     if (!channel && typeof BroadcastChannel !== 'undefined') {
-      channel = new BroadcastChannel('nexus-unread-sync');
+      channel = new BroadcastChannel('wolfnas-unread-sync');
     }
     return channel;
   } catch {
@@ -18,35 +18,35 @@ function getChannel(): BroadcastChannel | null {
 
 /** 广播未读变化（同页事件 + 跨标签） */
 export function dispatchUnreadSync() {
-  window.dispatchEvent(new Event('nexus-unread-sync'));
+  window.dispatchEvent(new Event('wolfnas-unread-sync'));
   getChannel()?.postMessage({ type: 'unread-sync' });
 }
 
 /** 监听未读同步，返回取消函数 */
 export function listenUnreadSync(callback: () => void): () => void {
   const onWindow = () => callback();
-  window.addEventListener('nexus-unread-sync', onWindow);
+  window.addEventListener('wolfnas-unread-sync', onWindow);
   const ch = getChannel();
   const onChannel = (e: MessageEvent) => {
     if (e.data?.type === 'unread-sync') callback();
   };
   if (ch) ch.addEventListener('message', onChannel);
   return () => {
-    window.removeEventListener('nexus-unread-sync', onWindow);
+    window.removeEventListener('wolfnas-unread-sync', onWindow);
     if (ch) ch.removeEventListener('message', onChannel);
   };
 }
 
 /** 请求消息中心定位到第一条未读（点击系统通知后定位用） */
 export function dispatchScrollFirstUnread() {
-  window.dispatchEvent(new Event('nexus-scroll-first-unread'));
+  window.dispatchEvent(new Event('wolfnas-scroll-first-unread'));
 }
 
 /** 监听"定位第一条未读"请求，返回取消函数 */
 export function listenScrollFirstUnread(callback: () => void): () => void {
   const onWindow = () => callback();
-  window.addEventListener('nexus-scroll-first-unread', onWindow);
+  window.addEventListener('wolfnas-scroll-first-unread', onWindow);
   return () => {
-    window.removeEventListener('nexus-scroll-first-unread', onWindow);
+    window.removeEventListener('wolfnas-scroll-first-unread', onWindow);
   };
 }

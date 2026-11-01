@@ -19,10 +19,10 @@ WolfNas のフロントエンドプロジェクトです。[Vben Admin](https://
 pnpm install
 
 # 開発モード
-pnpm dev:nexus
+pnpm dev:wolfnas
 
 # ビルド
-pnpm build:nexus
+pnpm build:wolfnas
 ```
 
 開発サーバーはデフォルトで `http://localhost:5555` で起動し、バックエンド `http://localhost:3000` にプロキシします。

@@ -27,6 +27,7 @@ import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import TransferModal from '#/components/media/TransferModal.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
 import { useMediaStore } from '#/store';
+import { getMigratedItem } from '#/utils/legacy-storage';
 import { useAppNotification } from '#/utils/notify';
 
 const mediaStore = useMediaStore();
@@ -42,12 +43,12 @@ const totalPage = ref(1);
 
 const unknownList = computed(() => mediaStore.unknownList);
 const viewMode = ref<'card' | 'list'>(
-  (localStorage.getItem('nexus.unknown.view') as 'card' | 'list') || 'card',
+  (getMigratedItem('wolfnas.unknown.view') as 'card' | 'list') || 'card',
 );
 
 function setViewMode(mode: 'card' | 'list') {
   viewMode.value = mode;
-  localStorage.setItem('nexus.unknown.view', mode);
+  localStorage.setItem('wolfnas.unknown.view', mode);
 }
 
 function fileName(item: any): string {

@@ -43,7 +43,7 @@ jobs:
           TURBO_CONCURRENCY: 2
         run: |
           pnpm install --frozen-lockfile
-          pnpm run build:nexus
+          pnpm run build:wolfnas
 
       - name: Set Up QEMU
         uses: docker/setup-qemu-action@v4

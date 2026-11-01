@@ -5,7 +5,9 @@
  * 实际 API 请求基地址会自动拼接 /api，健康检查使用 /health。
  */
 
-const BACKEND_URL_KEY = 'nexus-backend-url';
+import { getMigratedItem, removeMigratedItem } from './legacy-storage';
+
+const BACKEND_URL_KEY = 'wolfnas-backend-url';
 
 export function normalizeBackendUrl(url: string): string {
   return url.trim().replace(/\/+$/, '');
@@ -15,7 +17,7 @@ export function getBackendUrl(): null | string {
   if (typeof window === 'undefined') {
     return null;
   }
-  return localStorage.getItem(BACKEND_URL_KEY);
+  return getMigratedItem(BACKEND_URL_KEY);
 }
 
 export function setBackendUrl(url: string): void {
@@ -23,7 +25,7 @@ export function setBackendUrl(url: string): void {
 }
 
 export function removeBackendUrl(): void {
-  localStorage.removeItem(BACKEND_URL_KEY);
+  removeMigratedItem(BACKEND_URL_KEY);
 }
 
 export function getApiBaseUrl(url?: string): null | string {

@@ -4,6 +4,8 @@
  */
 import { ref } from 'vue';
 
+import { getMigratedItem } from './legacy-storage';
+
 export interface NotifySettings {
   /** 是否启用 OS 系统通知 */
   osEnabled: boolean;
@@ -13,11 +15,11 @@ export interface NotifySettings {
   badgeEnabled: boolean;
 }
 
-const SETTINGS_KEY = 'nexus-notify-settings';
+const SETTINGS_KEY = 'wolfnas-notify-settings';
 
 function loadSettings(): NotifySettings {
   try {
-    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '');
+    const raw = JSON.parse(getMigratedItem(SETTINGS_KEY) || '');
     return {
       osEnabled: raw?.osEnabled !== false,
       soundEnabled: raw?.soundEnabled === true,
@@ -163,7 +165,7 @@ async function flushNotifyQueue() {
     const notification = new Notification(title, {
       body,
       icon: '/static/img/logo/logo-mark.png',
-      tag: 'nexus-message',
+      tag: 'wolfnas-message',
     });
     notification.addEventListener('click', () => {
       window.focus();

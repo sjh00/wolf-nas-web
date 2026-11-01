@@ -3,4 +3,4 @@ ports:
     onOpen: open-preview
 tasks:
   - init: npm i -g corepack && pnpm install
-    command: pnpm run dev:nexus
+    command: pnpm run dev:wolfnas
