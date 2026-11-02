@@ -153,9 +153,19 @@ const showProgress = computed(
 const downloadedCount = computed(() => {
   const total = Number(props.item.total) || 0;
   const current = Number(props.item.current_ep) || 0;
+  const hasLack =
+    props.item.lack !== null &&
+    props.item.lack !== undefined &&
+    props.item.lack !== '';
+  // 优先用后端维护的真实缺失集数量（total - lack）。
+  // 旧实现在 current_ep 存在时用 current_ep - 1 反推，等价于假设缺失集是
+  // 从 current_ep 到 total 的连续后缀；从最新集开始看的订阅会被算成 0%。
+  if (hasLack) {
+    const lack = Math.min(Math.max(0, Number(props.item.lack) || 0), total);
+    return Math.max(0, Math.min(total, total - lack));
+  }
   if (current > 0) return Math.max(0, Math.min(total, current - 1));
-  const lack = Number(props.item.lack) || 0;
-  return Math.max(0, total - lack);
+  return 0;
 });
 
 const progressPercent = computed(() => {

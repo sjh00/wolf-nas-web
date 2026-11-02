@@ -177,11 +177,22 @@ function itemProgress(item: Record<string, any>) {
   const total = Number(item.total) || 0;
   if (!total) return null;
   const current = Number(item.current_ep) || 0;
-  const lack = Number(item.lack) || 0;
+  const hasLack =
+    item.lack !== null && item.lack !== undefined && item.lack !== '';
+  const lack = hasLack
+    ? Math.min(Math.max(0, Number(item.lack) || 0), total)
+    : null;
+  // 优先用后端维护的真实缺失集数量：进度 = total - lack。
+  // 旧实现在 current_ep 存在时用 current_ep - 1 反推已下载数，等价于假设
+  // 「缺失集是 current_ep..total 的连续后缀」；从最新集开始看的订阅
+  // （缺 1..39、已下 40-41、current_ep 仍是 1）会被算成 0%。
+  // 只有后端没给 lack 时才退回旧口径兜底。
   const downloaded =
-    current > 0
-      ? Math.max(0, Math.min(total, current - 1))
-      : Math.max(0, total - lack);
+    lack !== null
+      ? Math.max(0, Math.min(total, total - lack))
+      : current > 0
+        ? Math.max(0, Math.min(total, current - 1))
+        : 0;
   return {
     percent: Math.round((downloaded / total) * 100),
     text: `${downloaded}/${total}`,
