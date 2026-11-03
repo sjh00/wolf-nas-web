@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -26,6 +27,7 @@ import { copyText } from '#/utils/clipboard';
 
 const downloadStore = useDownloadStore();
 const message = useMessage();
+const router = useRouter();
 const loading = ref(false);
 const currentPage = ref(1);
 const pageSize = ref(30);
@@ -113,6 +115,14 @@ function formatSeasonEpisode(se?: string) {
 
 function handlePageChange(page: number) {
   fetchData(page);
+}
+
+function goLifecycle(item: any) {
+  const identity = String(item.identity_id || '');
+  router.push({
+    path: '/media/lifecycle',
+    query: identity ? { identity_id: identity } : { keyword: item.title || '' },
+  });
 }
 
 async function copyLink(url: string) {
@@ -232,6 +242,9 @@ onMounted(() => fetchData(1));
                     item.site
                   }}</span>
                   <NSpace align="center" size="small">
+                    <span v-if="item.state === 'queued'" class="history-queued"
+                      >排队中</span
+                    >
                     <NButton
                       v-if="item.enclosure"
                       size="tiny"
@@ -242,6 +255,17 @@ onMounted(() => fetchData(1));
                         <IconifyIcon icon="lucide:link" class="size-3.5" />
                       </template>
                       复制链接
+                    </NButton>
+                    <NButton
+                      size="tiny"
+                      text
+                      title="查看媒体流转"
+                      @click="goLifecycle(item)"
+                    >
+                      <template #icon>
+                        <IconifyIcon icon="lucide:activity" class="size-3.5" />
+                      </template>
+                      流转
                     </NButton>
                     <NPopconfirm
                       v-if="item.history_id"
@@ -320,6 +344,9 @@ onMounted(() => fetchData(1));
                 <span v-if="item.site" class="history-site">{{
                   item.site
                 }}</span>
+                <span v-if="item.state === 'queued'" class="history-queued"
+                  >排队中</span
+                >
               </div>
             </div>
 
@@ -334,6 +361,17 @@ onMounted(() => fetchData(1));
                   <IconifyIcon icon="lucide:link" class="size-3.5" />
                 </template>
                 <span class="hidden sm:inline">复制链接</span>
+              </NButton>
+              <NButton
+                size="tiny"
+                text
+                title="查看媒体流转"
+                @click="goLifecycle(item)"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:activity" class="size-3.5" />
+                </template>
+                <span class="hidden sm:inline">流转</span>
               </NButton>
               <NPopconfirm
                 v-if="item.history_id"
@@ -464,6 +502,8 @@ onMounted(() => fetchData(1));
 
 .history-footer {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
   align-items: center;
   justify-content: space-between;
   margin-top: auto;
@@ -537,11 +577,20 @@ onMounted(() => fetchData(1));
 
 /* ===== Common ===== */
 .history-site {
+  display: inline-block;
+  flex-shrink: 0;
   padding: 0.125rem 0.5rem;
   font-size: 0.75rem;
+  line-height: 1.4;
   color: hsl(var(--accent-foreground));
+  white-space: nowrap;
   background-color: hsl(var(--accent));
   border-radius: 9999px;
+}
+
+.history-queued {
+  font-size: 12px;
+  color: hsl(var(--warning));
 }
 
 .history-date {

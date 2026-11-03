@@ -158,12 +158,38 @@ function saveRename() {
   );
 }
 
-function currentProviderName(): string {
-  return config.value['agent.default_provider'] || 'openai';
+function resolveAgentProvider(): string {
+  const configured = String(
+    config.value['agent.default_provider'] || '',
+  ).trim();
+  if (configured) return configured;
+  for (const key of Object.keys(config.value)) {
+    const match = key.match(/^agent\.providers\.([^.]+)\.model$/);
+    if (match?.[1] && String(config.value[key] || '').trim()) {
+      return match[1];
+    }
+  }
+  return 'openai';
 }
 
 function saveAi() {
   const data: Record<string, any> = {};
+
+  const explicitProvider = String(
+    config.value['agent.default_provider'] || '',
+  ).trim();
+  const provider = resolveAgentProvider();
+  const model = String(
+    config.value[`agent.providers.${provider}.model`] || '',
+  ).trim();
+  if (model) {
+    data['agent.default_provider'] = provider;
+  } else if (explicitProvider) {
+    // 显式选择了 provider 却没填模型，保存会得到不可用的 AI 配置。
+    message.error(`请为 ${provider} 选择或填写模型`);
+    return;
+  }
+
   for (const key of Object.keys(config.value)) {
     // 提交 Agent 全部配置：含 embedding / notify / long_term / fallback / providers
     if (!key.startsWith('agent.') || key === 'agent.test') continue;
@@ -185,6 +211,10 @@ function saveService() {
       'pt.ptrefresh_date_cron',
       'pt.search_auto',
       'pt.search_no_result_rss',
+      'queue.transfer_workers',
+      'queue.sync_workers',
+      'queue.scrape_workers',
+      'queue.lifecycle_reconcile_seconds',
     ]),
   );
 }
@@ -208,7 +238,7 @@ function saveLaboratory() {
 }
 
 async function fetchModels() {
-  const provider = currentProviderName();
+  const provider = resolveAgentProvider();
   const apiUrl = config.value[`agent.providers.${provider}.api_url`] || '';
   const apiKey = config.value[`agent.providers.${provider}.api_key`] || '';
   if (!apiUrl || (provider !== 'ollama' && !apiKey)) {

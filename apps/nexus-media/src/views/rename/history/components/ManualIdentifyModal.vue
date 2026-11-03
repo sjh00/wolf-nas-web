@@ -101,16 +101,21 @@ const profileOptions = computed(() => {
   return [...labels.entries()].map(([value, label]) => ({ label, value }));
 });
 
-const providerOptions = computed(() =>
-  providers.value
-    .filter((provider) =>
-      (provider.content_profiles || []).includes(form.value.content_profile),
-    )
+const providerOptions = computed(() => {
+  const profile = form.value.content_profile || 'default';
+  return providers.value
+    .filter((provider) => {
+      const profiles = provider.content_profiles || [];
+      if (['anime', 'default'].includes(profile)) {
+        return profiles.length === 0 || profiles.includes(profile);
+      }
+      return profiles.includes(profile);
+    })
     .map((provider) => ({
       label: provider.name || provider.provider,
       value: provider.provider,
-    })),
-);
+    }));
+});
 
 async function loadProviders() {
   if (providerCache) {
@@ -140,15 +145,20 @@ function filenameStem(path: string) {
 
 function ensureProvider() {
   const options = providerOptions.value;
-  if (!isCustomProfile.value) {
-    form.value.provider = '';
-    form.value.external_id = '';
-    form.value.selectedLabel = '';
-    return;
-  }
   const preferred = String(props.item?.ANCHOR_PROVIDER || '');
+  const defaultProvider =
+    form.value.content_profile === 'default'
+      ? 'tmdb'
+      : form.value.content_profile === 'anime'
+        ? 'bangumi'
+        : '';
   if (options.some((option) => option.value === preferred)) {
     form.value.provider = preferred;
+  } else if (
+    defaultProvider &&
+    options.some((option) => option.value === defaultProvider)
+  ) {
+    form.value.provider = defaultProvider;
   } else if (!options.some((option) => option.value === form.value.provider)) {
     form.value.provider = options[0]?.value || '';
   }
@@ -212,10 +222,15 @@ watch(
     form.value.selectedLabel = '';
     form.value.tmdb = undefined;
     metadataResults.value = [];
-    if (!['anime', 'default'].includes(profile)) {
-      form.value.provider = providerOptions.value[0]?.value || '';
+    if (profile === 'default') {
+      form.value.provider = 'tmdb';
+    } else if (profile === 'anime') {
+      form.value.provider =
+        providerOptions.value.find((item) => item.value === 'bangumi')?.value ||
+        providerOptions.value[0]?.value ||
+        '';
     } else {
-      form.value.provider = '';
+      form.value.provider = providerOptions.value[0]?.value || '';
     }
   },
 );
@@ -258,8 +273,12 @@ function selectTmdbMedia(media: any) {
 }
 
 async function searchCustomMetadata() {
+  if (form.value.provider === 'tmdb') {
+    openTmdbSearch();
+    return;
+  }
   if (!form.value.query.trim()) {
-    notification.warning('请输入番号或关键词');
+    notification.warning('请输入内容编号或关键词');
     return;
   }
   metadataSearchLoading.value = true;
@@ -280,11 +299,21 @@ async function searchCustomMetadata() {
   }
 }
 
+function metadataProvider(result: Record<string, any>) {
+  return String(result.provider || result.ref?.provider || '');
+}
+
+function metadataExternalId(result: Record<string, any>) {
+  return String(
+    result.external_id || result.ref?.external_id || result.id || '',
+  );
+}
+
 function selectMetadataResult(result: Record<string, any>) {
-  form.value.provider = String(result.provider || form.value.provider);
-  form.value.external_id = String(result.external_id || '');
+  form.value.provider = metadataProvider(result) || form.value.provider;
+  form.value.external_id = metadataExternalId(result);
   form.value.selectedLabel = [
-    result.title || result.external_id,
+    result.title || metadataExternalId(result),
     result.year ? `(${result.year})` : '',
   ]
     .filter(Boolean)
@@ -301,6 +330,10 @@ async function submit() {
     notification.warning('请先搜索并选择插件识别结果');
     return;
   }
+  if (!form.value.external_id && !form.value.tmdb) {
+    notification.warning('请选择元数据搜索结果或输入 TMDB ID');
+    return;
+  }
   loading.value = true;
   try {
     const payload: Record<string, any> = {
@@ -315,11 +348,14 @@ async function submit() {
       episode_offset: form.value.episode_offset || undefined,
       content_profile: form.value.content_profile || undefined,
     };
-    if (isCustomProfile.value) {
+    if (form.value.provider !== 'tmdb' && form.value.external_id) {
       payload.provider = form.value.provider;
       payload.external_id = form.value.external_id;
-    } else {
+    } else if (form.value.tmdb) {
       payload.tmdb = form.value.tmdb;
+    } else {
+      payload.provider = form.value.provider || undefined;
+      payload.external_id = form.value.external_id || undefined;
     }
     await manualTransferApi(payload);
     notification.success('手动识别成功');
@@ -365,80 +401,80 @@ async function submit() {
           内容画像与元数据由插件 provider 提供，载体类型仅用于命名和目录。
         </div>
 
-        <template v-if="isCustomProfile">
-          <NFormItem label="元数据来源">
-            <NSelect
-              :value="form.provider"
-              :loading="providersLoading"
-              :options="providerOptions"
-              placeholder="选择插件 provider"
-              @update:value="handleProviderChange"
+        <NFormItem label="元数据来源">
+          <NSelect
+            :value="form.provider"
+            :loading="providersLoading"
+            :options="providerOptions"
+            placeholder="选择插件 provider"
+            @update:value="handleProviderChange"
+          />
+        </NFormItem>
+        <NFormItem v-if="form.provider !== 'tmdb'" label="内容编号 / 关键词">
+          <NSpace align="center" :wrap="false" style="width: 100%">
+            <NInput
+              v-model:value="form.query"
+              placeholder="输入内容编号或关键词"
+              style="flex: 1"
+              @keyup.enter="searchCustomMetadata"
             />
-          </NFormItem>
-          <NFormItem label="番号 / 关键词">
-            <NSpace align="center" :wrap="false" style="width: 100%">
-              <NInput
-                v-model:value="form.query"
-                placeholder="输入番号或关键词"
-                style="flex: 1"
-                @keyup.enter="searchCustomMetadata"
-              />
-              <NButton
-                :loading="metadataSearchLoading"
-                @click="searchCustomMetadata"
-              >
-                <template #icon>
-                  <IconifyIcon icon="lucide:search" class="size-4" />
-                </template>
-                搜索
-              </NButton>
-            </NSpace>
-          </NFormItem>
-          <NFormItem label="已选结果">
-            <span v-if="form.external_id" class="selected-result">
-              <span class="selected-provider">{{ form.provider }}</span>
-              {{ form.selectedLabel || form.external_id }}
-            </span>
-            <span v-else class="empty-result">
-              请搜索并选择插件返回的结果
-            </span>
-          </NFormItem>
-          <div v-if="metadataResults.length > 0" class="metadata-results">
-            <button
-              v-for="result in metadataResults"
-              :key="`${result.provider}:${result.external_id}`"
-              type="button"
-              class="metadata-item"
-              @click="selectMetadataResult(result)"
+            <NButton
+              :loading="metadataSearchLoading"
+              @click="searchCustomMetadata"
             >
-              <span class="metadata-title">
-                {{ result.title || result.external_id }}
-                <small v-if="result.year">({{ result.year }})</small>
-              </span>
-              <span class="metadata-ref">
-                {{ result.provider }} · {{ result.external_id }}
-              </span>
-            </button>
-          </div>
-        </template>
+              <template #icon>
+                <IconifyIcon icon="lucide:search" class="size-4" />
+              </template>
+              搜索
+            </NButton>
+          </NSpace>
+        </NFormItem>
+        <NFormItem v-if="form.provider !== 'tmdb'" label="已选结果">
+          <span v-if="form.external_id" class="selected-result">
+            <span class="selected-provider">{{ form.provider }}</span>
+            {{ form.selectedLabel || form.external_id }}
+          </span>
+          <span v-else class="empty-result"> 请搜索并选择插件返回的结果 </span>
+        </NFormItem>
+        <div
+          v-if="form.provider !== 'tmdb' && metadataResults.length > 0"
+          class="metadata-results"
+        >
+          <button
+            v-for="result in metadataResults"
+            :key="`${metadataProvider(result)}:${metadataExternalId(result)}`"
+            type="button"
+            class="metadata-item"
+            @click="selectMetadataResult(result)"
+          >
+            <span class="metadata-title">
+              {{ result.title || metadataExternalId(result) }}
+              <small v-if="result.year">({{ result.year }})</small>
+            </span>
+            <span class="metadata-ref">
+              {{ metadataProvider(result) }} · {{ metadataExternalId(result) }}
+            </span>
+          </button>
+        </div>
 
-        <template v-else>
-          <NFormItem label="TMDB ID">
-            <NSpace align="center" :wrap="false" style="width: 100%">
-              <NInputNumber
-                v-model:value="form.tmdb"
-                placeholder="输入 TMDB ID"
-                style="flex: 1"
-              />
-              <NButton @click="openTmdbSearch">
-                <template #icon>
-                  <IconifyIcon icon="lucide:search" class="size-4" />
-                </template>
-                搜索
-              </NButton>
-            </NSpace>
-          </NFormItem>
-        </template>
+        <NFormItem
+          v-if="form.provider === 'tmdb' || !form.provider"
+          label="TMDB ID"
+        >
+          <NSpace align="center" :wrap="false" style="width: 100%">
+            <NInputNumber
+              v-model:value="form.tmdb"
+              placeholder="或直接输入 TMDB ID"
+              style="flex: 1"
+            />
+            <NButton @click="openTmdbSearch">
+              <template #icon>
+                <IconifyIcon icon="lucide:search" class="size-4" />
+              </template>
+              搜索
+            </NButton>
+          </NSpace>
+        </NFormItem>
 
         <NFormItem v-if="form.type !== 'movie'" label="季">
           <NInputNumber

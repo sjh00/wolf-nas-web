@@ -6,7 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { IconifyIcon } from '@vben/icons';
 
-import { NButton, NSpin } from 'naive-ui';
+import { NButton, NSelect, NSpin } from 'naive-ui';
 
 import {
   getDiscoveryItemsApi,
@@ -41,13 +41,16 @@ const loadingMore = ref(false);
 const loadingSources = ref(true);
 const loadError = ref<null | { message: string; retryable: boolean }>(null);
 const selectedSeasonQuarter = ref(currentSeason().split('-q')[1]);
-const selectedYear = ref(String(new Date().getFullYear()));
+const selectedYear = ref('');
 const selectedSeason = computed(
   () =>
     `${selectedYear.value || new Date().getFullYear()}-q${selectedSeasonQuarter.value}`,
 );
 const selectedWeekday = ref('');
 const selectedGenre = ref('');
+const selectedSort = ref('');
+const sortOptions = ref<Array<{ label: string; value: string }>>([]);
+const sortOptionsFeed = ref('');
 const genreOptions = ref<Array<{ label: string; value: string }>>([]);
 const genreOptionsFeed = ref('');
 const weekdayOptions = [
@@ -120,6 +123,9 @@ const supportsWeekday = computed(() =>
 );
 const supportsGenre = computed(() =>
   (activeFeedConfig.value?.facets || []).includes('genre'),
+);
+const supportsSort = computed(() =>
+  (activeFeedConfig.value?.facets || []).includes('sort'),
 );
 const hasGenreOptions = computed(() =>
   genreOptions.value.some((item) => item.value !== '其他'),
@@ -255,6 +261,9 @@ async function loadItems(reset = false, force = false) {
             ...(supportsGenre.value && selectedGenre.value
               ? { genre: selectedGenre.value }
               : {}),
+            ...(supportsSort.value && selectedSort.value
+              ? { sort: selectedSort.value }
+              : {}),
           },
         }),
         // 冷缓存时后端可能先等后台预热，再走一次浏览器挑战；与浏览器
@@ -272,6 +281,25 @@ async function loadItems(reset = false, force = false) {
       return;
     }
     loadError.value = null;
+    if (supportsSort.value) {
+      const feedKey = `${provider}:${feed}`;
+      if (sortOptionsFeed.value !== feedKey) {
+        const facets: any[] = (result as any)?.facets?.sort || [];
+        if (facets.length) {
+          sortOptions.value = facets.map((item) => ({
+            label: String(item.label || item.value),
+            value: String(item.value),
+          }));
+          if (
+            selectedSort.value &&
+            !sortOptions.value.some((item) => item.value === selectedSort.value)
+          ) {
+            selectedSort.value = '';
+          }
+          sortOptionsFeed.value = feedKey;
+        }
+      }
+    }
     if (supportsGenre.value) {
       // 题材是 feed 级目录：只在首次加载/切换 feed 时刷新，避免翻页或筛选后被当前页结果改写。
       const feedKey = `${provider}:${feed}`;
@@ -342,6 +370,9 @@ function beginTabSwitch() {
   loading.value = true;
   selectedWeekday.value = '';
   selectedGenre.value = '';
+  selectedSort.value = '';
+  sortOptions.value = [];
+  sortOptionsFeed.value = '';
   genreOptions.value = [];
   genreOptionsFeed.value = '';
   loadError.value = null;
@@ -360,9 +391,18 @@ async function selectProvider(provider: string) {
   loadItems(true);
 }
 
+function selectSort(value: string) {
+  selectedSort.value = value;
+  loadItems(true);
+}
+
 async function selectFeed(feed: string) {
   if (feed === activeFeed.value) return;
   activeFeed.value = feed;
+  // Top250 等全量榜单不应继承上一个榜单的年份筛选，否则会被过滤成空。
+  selectedYear.value = '';
+  selectedGenre.value = '';
+  selectedSort.value = '';
   beginTabSwitch();
   savePreference();
   await nextTick();
@@ -519,9 +559,11 @@ function itemDetailLink(item: DiscoveryApi.Item) {
   const path = getContentProfileDetailPath(item.content_profile);
   if (!path) return undefined;
   const params = new URLSearchParams({
+    provider: item.ref.provider,
+    ref: item.ref.external_id,
     id: item.anchor_ref?.external_id || item.ref.external_id,
+    type: 'movie',
     profile: item.content_profile || '',
-    ref: itemMetadataRef(item),
   });
   return `${path}?${params.toString()}`;
 }
@@ -532,18 +574,30 @@ function itemVote(item: DiscoveryApi.Item) {
 }
 
 function handleSearchFromCard(item: Record<string, any>) {
+  // 榜单真实来源（javdb/javalibrary/douban）和内部身份锚点（content_id）是两回事。
+  const sourceProvider = String(item.provider || '').trim();
+  const anchorProvider = String(item.anchorProvider || sourceProvider).trim();
+  const externalId = String(item.anchorExternalId || '').trim();
+  // 只有 content_id 这类内容编号源才用编号当关键词；豆瓣/Bangumi/TMDB
+  // 使用标题，避免把 37923549 这样的豆瓣 ID 当成搜索词。
+  const contentIdProfile =
+    anchorProvider === 'content_id' ||
+    (item.contentProfile &&
+      !['anime', 'default', 'movie', 'tv'].includes(
+        String(item.contentProfile),
+      ));
+  const searchWord = contentIdProfile && externalId ? externalId : item.title;
   router.push({
     path: '/media/search',
     query: {
-      s:
-        item.contentProfile && item.anchorExternalId
-          ? item.anchorExternalId
-          : item.title,
+      s: searchWord,
       from: item.contentProfile ? 'subscription' : 'discovery',
       tmdbid: item.tmdbId || '',
       media_type: item.mediaType || item.type || '',
-      anchor_provider: item.anchorProvider || '',
-      anchor_external_id: item.anchorExternalId || '',
+      metadata_source: sourceProvider || anchorProvider,
+      metadata_ref: item.metadataRef || '',
+      anchor_provider: anchorProvider,
+      anchor_external_id: externalId,
       content_profile: item.contentProfile || '',
       poster: item.poster || '',
       vote: item.vote || '',
@@ -553,18 +607,16 @@ function handleSearchFromCard(item: Record<string, any>) {
 }
 
 function handleCardSearch(item: DiscoveryApi.Item) {
-  const customProfile =
-    item.content_profile && item.content_profile !== 'default';
   handleSearchFromCard({
     anchorExternalId: item.anchor_ref?.external_id,
-    anchorProvider: item.anchor_ref?.provider,
+    anchorProvider: item.anchor_ref?.provider || item.ref.provider,
+    provider: item.ref.provider,
+    metadataRef: itemMetadataRef(item),
     contentProfile: item.content_profile || '',
     id: itemId(item),
     mediaType: itemType(item),
-    // 自定义画像（如 AV）用番号/内容 ID 搜索，而不是日文标题
-    title: customProfile
-      ? item.anchor_ref?.external_id || item.title
-      : item.title,
+    // 普通元数据源统一用标题；content_id 由 handleSearchFromCard 用编号。
+    title: item.title,
     tmdbId: itemTmdbId(item),
     poster: item.poster || '',
     vote: itemVote(item),
@@ -751,6 +803,18 @@ onUnmounted(() => {
               {{ feedsExpanded ? '收起' : '更多' }}
             </button>
           </div>
+        </div>
+
+        <div v-if="supportsSort" class="filter-row filter-row--facets">
+          <span class="filter-label">排序</span>
+          <NSelect
+            :value="selectedSort || null"
+            :options="sortOptions"
+            placeholder="默认排序"
+            size="small"
+            class="sort-select"
+            @update:value="selectSort"
+          />
         </div>
 
         <template v-if="supportsYear">
@@ -1186,5 +1250,12 @@ onUnmounted(() => {
     flex: none;
     width: 100%;
   }
+}
+</style>
+
+<style scoped>
+.sort-select {
+  width: 180px;
+  min-width: 180px;
 }
 </style>
