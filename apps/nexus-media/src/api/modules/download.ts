@@ -108,6 +108,7 @@ export namespace DownloadApi {
   }
 
   export interface DownloadHistoryItem {
+    state?: string;
     id: string;
     history_id?: number;
     content_profile?: string;

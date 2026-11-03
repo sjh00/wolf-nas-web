@@ -114,6 +114,9 @@ interface SearchResult {
   content_profile?: string;
   metadata_ref?: string;
   provider?: string;
+  anchor_provider?: string;
+  anchor_external_id?: string;
+  identity_id?: string;
   poster: string;
   overview: string;
   fav: string;
@@ -158,6 +161,43 @@ function normalizeMediaType(type?: string): 'anime' | 'movie' | 'tv' {
   if (t === 'anime' || t === '动漫') return 'anime';
   if (t === 'tv' || t === '剧集' || t === '电视剧') return 'tv';
   return 'tv';
+}
+
+function mediaIdentityKey(item: any): string {
+  if (item?.identity_id) return `id:${item.identity_id}`;
+  const provider = String(item?.anchor_provider || item?.provider || '').trim();
+  const external = String(item?.anchor_external_id || '').trim();
+  if (provider && external) return `${provider}:${external}`;
+  if (item?.metadata_ref) return String(item.metadata_ref);
+  if (item?.tmdb_id) return `tmdb:${item.tmdb_id}`;
+  return `local:${item?.id || item?.key || item?.title || ''}`;
+}
+
+function normalizeMediaItem(raw: any): MediaItem {
+  const linkProvider = String(raw?.links?.[0]?.provider || '').trim();
+  const provider = String(
+    raw?.anchor_provider || raw?.provider || linkProvider || '',
+  ).trim();
+  let external = String(raw?.anchor_external_id || '').trim();
+  if (!external && provider === 'douban')
+    external = String(raw?.douban_id || '');
+  if (!external && provider === 'tmdb') {
+    external = String(raw?.tmdb_id || raw?.orgid || raw?.id || '');
+  }
+  if (!external && raw?.metadata_ref) {
+    const [, ...rest] = String(raw.metadata_ref).split(':');
+    external = rest.join(':');
+  }
+  const tmdbOnly = provider === 'tmdb' ? external : '';
+  return {
+    ...raw,
+    anchor_provider: provider || undefined,
+    anchor_external_id: external || undefined,
+    metadata_ref:
+      raw?.metadata_ref ||
+      (provider && external ? `${provider}:${external}` : undefined),
+    tmdb_id: tmdbOnly || undefined,
+  } as MediaItem;
 }
 
 function itemLinks(item: any): Array<{ label: string; url: string }> {
@@ -215,10 +255,18 @@ async function handleSubscribe(item: SearchResult, e: Event) {
     }
     return;
   }
+  const resultProvider = String(
+    (item as any).anchor_provider || (item as any).provider || '',
+  ).trim();
+  const resultExternal = String(
+    (item as any).anchor_external_id || item.key || '',
+  ).trim();
   subscribeConfirmItem.value = {
-    id: String(item.tmdbid || item.key),
-    tmdbid: item.tmdbid,
-    mediaid: (item as any).metadata_ref || String(item.tmdbid || item.key),
+    id: resultExternal,
+    tmdbid: resultProvider === 'tmdb' ? String(item.tmdbid || '') : '',
+    mediaid:
+      (item as any).metadata_ref ||
+      (resultProvider ? `${resultProvider}:${resultExternal}` : resultExternal),
     title: item.title,
     year: item.year || '',
     type: mtype,
@@ -226,6 +274,7 @@ async function handleSubscribe(item: SearchResult, e: Event) {
     overview: item.overview,
     content_profile: (item as any).content_profile,
     metadata_ref: (item as any).metadata_ref,
+    provider: (item as any).provider,
     anchor_provider: (item as any).anchor_provider,
     anchor_external_id: (item as any).anchor_external_id,
   };
@@ -264,7 +313,10 @@ async function handleConfirmSubscribe(payload: {
           name: it.title,
           year: it.year || '',
           type: 'tv',
-          tmdbid: String(it.tmdbid || it.id),
+          tmdbid: it.tmdbid || undefined,
+          anchor_provider: it.anchor_provider,
+          anchor_external_id: it.anchor_external_id,
+          metadata_ref: it.metadata_ref,
           season: String(season),
           content_profile: it.content_profile,
         });
@@ -335,7 +387,7 @@ async function handleEditSubscribe() {
     name: it.title,
     year: it.year || '',
     type: mtype,
-    tmdbid: String(it.tmdbid || it.id || ''),
+    tmdbid: it.tmdbid || '',
     image: it.image,
     content_profile: it.content_profile,
     metadata_ref: it.metadata_ref,
@@ -383,7 +435,7 @@ async function handleConfirmEdit(data: Record<string, any>) {
         res?.rssid ? String(res.rssid) : undefined,
       );
       updateMediaSubscribeState(
-        it.id,
+        mediaIdentityKey(it),
         '1',
         res?.rssid ? String(res.rssid) : undefined,
       );
@@ -404,7 +456,7 @@ function updateMediaSubscribeState(
   rssid?: string,
 ) {
   for (const m of mediaResults.value) {
-    if (String(m.tmdb_id || m.id) === mediaId) {
+    if (mediaIdentityKey(m) === mediaId) {
       m.fav = fav;
       if (rssid !== undefined) m.rssid = String(rssid);
     }
@@ -412,10 +464,16 @@ function updateMediaSubscribeState(
 }
 
 function handleMediaSubscribe(media: MediaItem) {
+  const provider = String((media as any).anchor_provider || '').trim();
+  const external = String(
+    (media as any).anchor_external_id || media.id || '',
+  ).trim();
   subscribeConfirmItem.value = {
-    id: String(media.tmdb_id || media.id),
-    tmdbid: String(media.tmdb_id || media.id),
-    mediaid: (media as any).metadata_ref || String(media.tmdb_id || media.id),
+    id: external,
+    tmdbid: provider === 'tmdb' ? String(media.tmdb_id || external) : '',
+    mediaid:
+      (media as any).metadata_ref ||
+      (provider ? `${provider}:${external}` : external),
     title: media.title,
     year: media.year || '',
     type: normalizeMediaType(media.media_type || media.type),
@@ -423,6 +481,8 @@ function handleMediaSubscribe(media: MediaItem) {
     overview: media.overview,
     content_profile: (media as any).content_profile,
     metadata_ref: (media as any).metadata_ref,
+    anchor_provider: (media as any).anchor_provider,
+    anchor_external_id: (media as any).anchor_external_id,
   };
   subscribeConfirmShow.value = true;
 }
@@ -446,7 +506,7 @@ async function confirmUnsubscribe() {
   if (!media?.rssid) return;
   try {
     await deleteSubscriptionApi(Number(media.rssid));
-    updateMediaSubscribeState(String(media.tmdb_id || media.id), '');
+    updateMediaSubscribeState(mediaIdentityKey(media), '');
     updateCardSubscribeState(media.title, '');
     notification.success('已取消订阅', { description: media.title });
   } catch (error: any) {
@@ -458,17 +518,33 @@ async function confirmUnsubscribe() {
 
 const loading = ref(false);
 const keyword = ref('');
-const searchtype = ref<string>('tmdb');
+const searchtype = ref<string>('');
 const contentProfileKey = computed(() =>
   String(route.query.content_profile || ''),
 );
 const profileSources = computed(() =>
   getContentProfileSearchSources(contentProfileKey.value),
 );
+const initialMetadataSource = String(route.query.metadata_source || '').trim();
 const metadataSource = ref(
-  String(route.query.metadata_source || '') ||
-    getContentProfileDefaultSearchSource(contentProfileKey.value),
+  initialMetadataSource && initialMetadataSource !== 'content_id'
+    ? initialMetadataSource
+    : getContentProfileDefaultSearchSource(contentProfileKey.value),
 );
+
+function applyIncomingSource(source: string) {
+  const normalized = source.trim();
+  if (normalized && normalized !== 'content_id') {
+    metadataSource.value = normalized;
+    searchtype.value = normalized;
+    return;
+  }
+  // content_id 只是内部锚点，不能作为来源选项显示。
+  metadataSource.value = getContentProfileDefaultSearchSource(
+    contentProfileKey.value,
+  );
+  searchtype.value = '';
+}
 
 watch(profileSources, (sources) => {
   if (!sources.length) return;
@@ -477,13 +553,8 @@ watch(profileSources, (sources) => {
   }
 });
 
-// 持久化当前搜索关键词，用于从其他页面切回（无 query 参数）时恢复标题显示
-const SEARCH_KEYWORD_KEY = 'wolfnas:search:keyword';
 function setSearchKeyword(k: string) {
   keyword.value = k;
-  try {
-    if (k) sessionStorage.setItem(SEARCH_KEYWORD_KEY, k);
-  } catch {}
 }
 
 // 显示模式：empty | media(普通搜索媒体结果) | torrent(种子结果)
@@ -527,6 +598,7 @@ const {
   stop: stopSearchProgress,
 } = useSearchProgress();
 const searchSessionId = ref('');
+let resultPollToken = 0;
 const SEARCH_SESSION_KEY = 'wolfnas:search:session';
 
 function activeFilterCount(item: SearchResultWithFilter): number {
@@ -613,26 +685,20 @@ const downloadDirs = ref<Array<{ label: string; value: string }>>([
 const selectedDownloadSetting = ref('');
 const selectedDownloadDir = ref('');
 
-/** 从 sessionStorage 恢复进行中的搜索（页面切回时自动重连 SSE） */
-function resumeOngoingSearch(): boolean {
-  const sid = sessionStorage.getItem(SEARCH_SESSION_KEY);
-  if (!sid) return false;
-
-  // 路由有显式搜索参数 → 优先级高于 sessionStorage，不恢复旧会话
-  const s = route.query.s as string;
-  if (s) return false;
-
-  const kw = sessionStorage.getItem(SEARCH_KEYWORD_KEY);
-  if (kw) keyword.value = kw;
-
-  searchSessionId.value = sid;
-  displayMode.value = 'torrent';
-  loading.value = true;
-  startSearchProgress(sid, () => {
+/** 清空搜索页状态；从菜单进入时不恢复上次搜索 */
+function resetSearchLanding() {
+  resultPollToken += 1;
+  stopSearchProgress();
+  searchSessionId.value = '';
+  keyword.value = '';
+  mediaResults.value = [];
+  results.value = [];
+  resultCount.value = 0;
+  displayMode.value = 'empty';
+  loading.value = false;
+  try {
     sessionStorage.removeItem(SEARCH_SESSION_KEY);
-    loadSearchResults();
-  });
-  return true;
+  } catch {}
 }
 
 const metadataProviders = ref<
@@ -677,7 +743,7 @@ async function loadMetadataProviders() {
       )
       .map((item: any) => ({
         label: String(item.name || item.provider),
-        // private/adult provider 也必须在选择后使用自己的 content_profile，
+        // 插件 provider 也必须在选择后使用自己的 content_profile，
         // 不能因为 visibility=private 被丢弃而回退到 TMDB 搜索。
         profile: String(item.content_profiles?.[0] || ''),
         value: String(item.provider),
@@ -731,21 +797,21 @@ function mapMetadataResults(list: any[]): MediaItem[] {
         keyword.value.trim().toUpperCase();
     return {
       content_profile: item.content_profile,
-      id: String(contentId || item.title || ''),
-      image: (isKeywordHit ? routePoster : '') || item.poster || '',
+      id: String(anchorExternalId || contentId || item.title || ''),
+      image: item.poster || (isKeywordHit ? routePoster : ''),
       media_type: item.media_type || 'movie',
       metadata_ref: item.ref
         ? `${item.ref.provider}:${item.ref.external_id}`
         : '',
       overview: item.overview || '',
-      poster: (isKeywordHit ? routePoster : '') || item.poster || '',
+      poster: item.poster || (isKeywordHit ? routePoster : ''),
       provider: item.ref?.provider || '',
       anchor_provider: anchorProvider,
       anchor_external_id: anchorExternalId,
       search_query: searchQuery,
       studio,
       title: item.title || String(contentId || ''),
-      tmdb_id: '',
+      tmdb_id: anchorProvider === 'tmdb' ? anchorExternalId : '',
       type: item.media_type || 'movie',
       vote: item.extra?.rating || (isKeywordHit ? routeVote : ''),
       year: item.year || (isKeywordHit ? routeYear : ''),
@@ -780,16 +846,20 @@ function resolveSearchTarget() {
 
 async function handleSearch() {
   if (!keyword.value.trim()) return;
+  // 取消上一个搜索的结果轮询，避免旧资源结果覆盖当前影视搜索。
+  resultPollToken += 1;
+  stopSearchProgress();
   displayMode.value = 'media';
   mediaResults.value = [];
   loading.value = true;
   try {
     const { activeProvider, sourceProfile } = resolveSearchTarget();
-    if (sourceProfile) {
+    // 搜索只使用当前选定的单一 provider；所有 provider 统一走 metadata 接口。
+    if (activeProvider) {
       const res: any = await searchMetadataApi({
-        content_profile: sourceProfile,
+        content_profile: sourceProfile || undefined,
         limit: 24,
-        provider: activeProvider || undefined,
+        provider: activeProvider,
         query: keyword.value,
       });
       const list = Array.isArray(res) ? res : res?.data || [];
@@ -798,20 +868,14 @@ async function handleSearch() {
       );
       return;
     }
-    // 只有 TMDB/豆瓣这类媒体搜索来源才允许走 /media/search；
-    // metadata provider 缺少画像时必须报错，不能把 provider 当 searchtype。
-    if (activeProvider && !['douban', 'tmdb'].includes(activeProvider)) {
-      notification.error('搜索来源配置缺失', {
-        description: `未找到 ${activeProvider} 的 content_profile，请重新加载插件后重试`,
-      });
-      return;
-    }
+    // 未选择来源时保留旧入口兼容，不进行多 provider 聚合。
     const res: any = await searchMediaApi({
       keyword: keyword.value,
-      searchtype: activeProvider as '' | 'douban' | 'tmdb',
+      searchtype: '',
     });
-    // requestClient 在 code===0 时自动解包返回 data，所以 res 直接是数组
-    mediaResults.value = Array.isArray(res) ? res : res?.data || [];
+    mediaResults.value = (Array.isArray(res) ? res : res?.data || []).map(
+      normalizeMediaItem,
+    );
   } catch (error: any) {
     notification.error('搜索失败', {
       description: error?.message || '未知错误',
@@ -832,10 +896,22 @@ function handleMediaCardClick(media: MediaItem) {
       String(media.metadata_ref || '').split(':')[1] ||
       '',
   );
-  if (
-    (anchorProvider === 'douban' || anchorProvider === 'bangumi') &&
-    anchorExternal
-  ) {
+  // 插件内容画像必须先走插件注册的详情路由，不能被通用 provider 分支截走。
+  if (media.content_profile && media.content_profile !== 'default') {
+    const detailPath = getContentProfileDetailPath(media.content_profile);
+    if (!detailPath) return;
+    const params = new URLSearchParams({
+      id: String(media.id),
+      profile: media.content_profile,
+      ...(anchorProvider ? { provider: anchorProvider } : {}),
+      ...(anchorExternal ? { ref: anchorExternal } : {}),
+      ...(media.metadata_ref ? { metadata_ref: media.metadata_ref } : {}),
+    });
+    router.push(`${detailPath}?${params.toString()}`);
+    return;
+  }
+  // 所有普通 provider（含 TMDB）统一走 provider+ref 详情，不再把 TMDB 当默认。
+  if (anchorProvider && anchorExternal) {
     router.push({
       name: 'MediaDetail',
       query: {
@@ -844,17 +920,6 @@ function handleMediaCardClick(media: MediaItem) {
         type: normalizeMediaType(media.media_type || media.type),
       },
     });
-    return;
-  }
-  if (media.content_profile && media.content_profile !== 'default') {
-    const detailPath = getContentProfileDetailPath(media.content_profile);
-    if (!detailPath) return;
-    const params = new URLSearchParams({
-      id: String(media.id),
-      profile: media.content_profile,
-      ...(media.metadata_ref ? { ref: media.metadata_ref } : {}),
-    });
-    router.push(`${detailPath}?${params.toString()}`);
     return;
   }
   const id = media.tmdb_id || media.id;
@@ -868,6 +933,8 @@ function handleMediaCardClick(media: MediaItem) {
 
 /** 点击「搜索资源」→ 触发种子搜索 */
 async function handleMediaSearch(media: MediaItem) {
+  resultPollToken += 1;
+  stopSearchProgress();
   if (media.content_profile && media.content_profile !== 'default') {
     const code = String(media.search_query || media.id || media.title || '');
     const query: Record<string, string> = {
@@ -876,23 +943,69 @@ async function handleMediaSearch(media: MediaItem) {
       media_type: 'movie',
       content_profile: media.content_profile,
       metadata_source: media.provider || metadataSource.value,
-      anchor_provider: media.anchor_provider || 'content_id',
+      anchor_provider: media.anchor_provider || media.provider || 'content_id',
       anchor_external_id: media.anchor_external_id || code,
     };
     if (media.poster) query.poster = media.poster;
     if (media.vote) query.vote = String(media.vote);
     if (media.year) query.year = String(media.year);
-    router.push({ path: '/media/search', query });
+    // 已经在搜索页时，router.push 相同 query 不会触发 watch；
+    // 这里直接发起资源搜索，保证按钮一定有反馈。
+    displayMode.value = 'torrent';
+    mediaResults.value = [];
+    results.value = [];
+    loading.value = true;
+    webSearchApi({
+      filters: {
+        ...buildSiteFilter(),
+        content_profile: media.content_profile,
+        ...(query.metadata_source
+          ? { metadata_source: query.metadata_source }
+          : {}),
+      },
+      search_word: code,
+      media_type: 'movie',
+      anchor_provider: query.anchor_provider,
+      anchor_external_id: query.anchor_external_id,
+    })
+      .then((resp: any) => {
+        searchSessionId.value = resp?.session_id || '';
+        if (searchSessionId.value)
+          sessionStorage.setItem(SEARCH_SESSION_KEY, searchSessionId.value);
+        startSearchProgress(searchSessionId.value, () => {
+          sessionStorage.removeItem(SEARCH_SESSION_KEY);
+          void loadResultsWhenReady();
+        });
+      })
+      .catch(() => {
+        loading.value = false;
+        sessionStorage.removeItem(SEARCH_SESSION_KEY);
+      });
     return;
   }
   displayMode.value = 'torrent';
   loading.value = true;
   setSearchKeyword(media.title);
   try {
+    const raw: any = media as any;
+    const metadataRef = String(raw.metadata_ref || '').trim();
+    let anchorProvider = String(
+      raw.anchor_provider || raw.provider || '',
+    ).trim();
+    let anchorExternalId = String(raw.anchor_external_id || '').trim();
+    if (!anchorProvider && metadataRef.includes(':')) {
+      const [provider, ...rest] = metadataRef.split(':');
+      anchorProvider = String(provider || '');
+      anchorExternalId = anchorExternalId || rest.join(':');
+    }
+    // 没有显式 provider 时不猜测 TMDB；让后端按标题/类型识别。
     const resp: any = await webSearchApi({
       filters: buildSiteFilter(),
       search_word: media.title,
-      tmdbid: String(media.tmdb_id || media.id || ''),
+      metadata_ref: metadataRef || undefined,
+      anchor_provider: anchorProvider || undefined,
+      anchor_external_id: anchorExternalId || undefined,
+      content_profile: raw.content_profile,
       media_type: media.type || media.media_type || '',
     });
     searchSessionId.value = resp?.session_id || '';
@@ -915,12 +1028,32 @@ function openResultDetail(item: SearchResult) {
   if (item.content_profile && item.content_profile !== 'default') {
     const detailPath = getContentProfileDetailPath(item.content_profile);
     if (!detailPath) return;
+    const contentProvider = String(
+      item.anchor_provider || item.provider || '',
+    ).trim();
+    const contentExternal = String(item.anchor_external_id || '').trim();
     const params = new URLSearchParams({
       id: item.title,
       profile: item.content_profile,
-      ...(item.metadata_ref ? { ref: item.metadata_ref } : {}),
+      ...(contentProvider ? { provider: contentProvider } : {}),
+      ...(contentExternal ? { ref: contentExternal } : {}),
+      ...(item.metadata_ref ? { metadata_ref: item.metadata_ref } : {}),
     });
     router.push(`${detailPath}?${params.toString()}`);
+    return;
+  }
+  const provider = String(item.anchor_provider || item.provider || '').trim();
+  const external = String(item.anchor_external_id || '').trim();
+  if (provider && external) {
+    router.push({
+      name: 'MediaDetail',
+      query: {
+        provider,
+        ref: external,
+        type: item.type_key || (item.type === 'movie' ? 'movie' : 'tv'),
+        ...(item.content_profile ? { profile: item.content_profile } : {}),
+      },
+    });
     return;
   }
   if (item.tmdbid && item.tmdbid !== '0') {
@@ -946,7 +1079,9 @@ async function handleResultSubscribe(item: SearchResult) {
   if (!item.content_profile || item.content_profile === 'default') {
     return;
   }
-  const code = item.title;
+  const code = String(
+    (item as any).anchor_external_id || (item as any).id || item.title || '',
+  ).trim();
   const preferredProvider =
     item.provider ||
     getContentProfileDefaultSearchSource(item.content_profile) ||
@@ -1073,7 +1208,7 @@ function withRoutePoster(item: any) {
 
 const overviewTitleCache = new Map<string, string>();
 
-/** 成人站点结果没有 POSTER，用当前画像 provider 补一张元数据海报 */
+/** 插件来源结果没有 POSTER 时，用当前画像 provider 补一张元数据海报 */
 async function enrichResultPoster(items: any[]) {
   if (items.length === 0 || items.some((item) => item.poster)) return;
   const profile = activeSearchProfile(items[0]);
@@ -1164,13 +1299,15 @@ function resultOverview(item: any): string {
   return String(item.overview || '').trim() || '暂无简介';
 }
 
-async function loadSearchResults() {
+async function loadSearchResults(keepLoading = false, token?: number) {
+  if (token !== undefined && token !== resultPollToken) return;
   loading.value = true;
   results.value = [];
   try {
     const res: any = await getSearchResultApi(
       searchSessionId.value || undefined,
     );
+    if (token !== undefined && token !== resultPollToken) return;
     const searchData = res?.result || {};
     if (typeof searchData === 'object') {
       results.value = Object.entries(searchData)
@@ -1197,6 +1334,12 @@ async function loadSearchResults() {
             key: item.key,
             tmdbid: item.tmdbid,
             type: item.type,
+            content_profile: item.content_profile,
+            metadata_ref: item.metadata_ref,
+            provider: item.provider,
+            anchor_provider: item.anchor_provider,
+            anchor_external_id: item.anchor_external_id,
+            identity_id: item.identity_id,
             year: item.year,
             vote: item.vote,
             poster: item.poster,
@@ -1238,7 +1381,24 @@ async function loadSearchResults() {
       }
     }
   } finally {
-    loading.value = false;
+    if (!keepLoading) loading.value = false;
+  }
+}
+
+async function loadResultsWhenReady() {
+  // 搜索尚未写库时保持加载态，不能每轮轮询都闪一次“未找到”。
+  const token = ++resultPollToken;
+  loading.value = true;
+  try {
+    for (let i = 0; i < 20; i += 1) {
+      if (token !== resultPollToken) return;
+      await loadSearchResults(true, token);
+      if (token !== resultPollToken) return;
+      if (results.value.length > 0 || !keyword.value) return;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  } finally {
+    if (token === resultPollToken) loading.value = false;
   }
 }
 
@@ -1251,18 +1411,39 @@ function handleKeydown(e: KeyboardEvent) {
 // 防止 onMounted 与 watch 对同一次路由跳转重复触发搜索
 let lastHandledQueryKey = '';
 
+function routeQueryKey(q: Record<string, any>): string {
+  return [
+    q.s,
+    q.from,
+    q.session_id,
+    q.tmdbid,
+    q.content_profile,
+    q.metadata_source,
+    q.anchor_provider,
+    q.anchor_external_id,
+    q.metadata_ref,
+  ].join('|');
+}
+
 onMounted(() => {
   void loadMetadataProviders();
   loadVisibleSites();
   startSSE();
-  // 有进行中的搜索（页面切回）→ 恢复 SSE 连接和进度
-  if (resumeOngoingSearch()) return;
+  const initialS = String(route.query.s || '');
+  lastHandledQueryKey = routeQueryKey(route.query);
+  // 从菜单进入搜索页时不恢复上次会话，避免自动发起旧关键词搜索
+  if (!initialS) {
+    resetSearchLanding();
+    return;
+  }
 
-  lastHandledQueryKey = `${route.query.s}|${route.query.from}|${route.query.session_id}|${route.query.tmdbid}`;
+  resultPollToken += 1;
+  stopSearchProgress();
 
-  const s = route.query.s as string;
+  const s = initialS;
   const from = route.query.from as string;
   const sid = route.query.session_id as string;
+  applyIncomingSource(String(route.query.metadata_source || ''));
   if (sid) searchSessionId.value = sid;
 
   if (s) {
@@ -1277,7 +1458,7 @@ onMounted(() => {
       if (sid) sessionStorage.setItem(SEARCH_SESSION_KEY, sid);
       startSearchProgress(sid, () => {
         sessionStorage.removeItem(SEARCH_SESSION_KEY);
-        loadSearchResults();
+        void loadResultsWhenReady();
       });
     } else if (
       from === 'discovery' ||
@@ -1297,13 +1478,14 @@ onMounted(() => {
           ...(String(route.query.metadata_source || '')
             ? { metadata_source: String(route.query.metadata_source) }
             : {}),
-          ...(String(route.query.anchor_external_id || '')
-            ? { anchor_external_id: String(route.query.anchor_external_id) }
-            : {}),
         },
         search_word: s,
         tmdbid: tmdbId,
         media_type: mediaType,
+        anchor_provider: String(route.query.anchor_provider || '') || undefined,
+        anchor_external_id:
+          String(route.query.anchor_external_id || '') || undefined,
+        metadata_ref: String(route.query.metadata_ref || '') || undefined,
       })
         .then((resp: any) => {
           searchSessionId.value = resp?.session_id || '';
@@ -1311,7 +1493,7 @@ onMounted(() => {
             sessionStorage.setItem(SEARCH_SESSION_KEY, searchSessionId.value);
           startSearchProgress(resp?.session_id || '', () => {
             sessionStorage.removeItem(SEARCH_SESSION_KEY);
-            loadSearchResults();
+            void loadResultsWhenReady();
           });
         })
         .catch(() => {
@@ -1334,7 +1516,7 @@ onMounted(() => {
             sessionStorage.setItem(SEARCH_SESSION_KEY, searchSessionId.value);
           startSearchProgress(resp?.session_id || '', () => {
             sessionStorage.removeItem(SEARCH_SESSION_KEY);
-            loadSearchResults();
+            void loadResultsWhenReady();
           });
         })
         .catch((error: any) => {
@@ -1345,36 +1527,33 @@ onMounted(() => {
           });
         });
     }
-  } else {
-    loadSearchResults();
   }
 });
 // 探索/详情页跳转时组件复用，onMounted 不重跑 → watch 补救
 watch(
   () => route.query,
   (q) => {
-    const queryKey = [
-      q.s,
-      q.from,
-      q.session_id,
-      q.tmdbid,
-      q.content_profile,
-      q.metadata_source,
-      q.anchor_external_id,
-    ].join('|');
+    const queryKey = routeQueryKey(q);
     if (queryKey === lastHandledQueryKey) return;
     lastHandledQueryKey = queryKey;
+    resultPollToken += 1;
+    stopSearchProgress();
     const incomingSource = String(q.metadata_source || '').trim();
-    if (incomingSource) metadataSource.value = incomingSource;
-    else if (q.content_profile)
+    if (incomingSource) {
+      applyIncomingSource(incomingSource);
+    } else if (q.content_profile) {
       metadataSource.value = getContentProfileDefaultSearchSource(
         String(q.content_profile),
       );
+    }
     const s = q.s as string;
     const from = q.from as string;
     const tmdbId = (q.tmdbid as string) || '';
     const mediaType = (q.media_type as string) || '';
-    if (!s) return;
+    if (!s) {
+      resetSearchLanding();
+      return;
+    }
     setSearchKeyword(s);
     if (from === 'discovery' || from === 'detail' || from === 'subscription') {
       displayMode.value = 'torrent';
@@ -1387,13 +1566,13 @@ watch(
           ...(String(q.metadata_source || '')
             ? { metadata_source: String(q.metadata_source) }
             : {}),
-          ...(String(q.anchor_external_id || '')
-            ? { anchor_external_id: String(q.anchor_external_id) }
-            : {}),
         },
         search_word: s,
         tmdbid: tmdbId,
         media_type: mediaType,
+        anchor_provider: String(q.anchor_provider || '') || undefined,
+        anchor_external_id: String(q.anchor_external_id || '') || undefined,
+        metadata_ref: String(q.metadata_ref || '') || undefined,
       })
         .then((resp: any) => {
           searchSessionId.value = resp?.session_id || '';
@@ -1401,7 +1580,7 @@ watch(
             sessionStorage.setItem(SEARCH_SESSION_KEY, searchSessionId.value);
           startSearchProgress(resp?.session_id || '', () => {
             sessionStorage.removeItem(SEARCH_SESSION_KEY);
-            loadSearchResults();
+            void loadResultsWhenReady();
           });
         })
         .catch(() => {
@@ -1789,7 +1968,7 @@ async function confirmDownload() {
           class="search-select"
         />
         <NSelect
-          v-else-if="displayMode !== 'torrent'"
+          v-else
           v-model:value="searchtype"
           :options="typeOptions"
           class="search-select"
