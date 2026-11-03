@@ -7,6 +7,8 @@ import { IconifyIcon } from '@vben/icons';
 
 import { NButton } from 'naive-ui';
 
+import { copyText } from '#/utils/clipboard';
+
 import { capabilitiesOf, fileStateMeta, joinPath } from '../types';
 
 interface Props {
@@ -47,11 +49,8 @@ const canOpen = computed(() => Boolean(path.value));
 
 async function copyPath() {
   if (!path.value) return;
-  try {
-    await navigator.clipboard.writeText(path.value);
-  } catch {
-    // 浏览器不允许时静默失败，路径仍可手动复制
-  }
+  // copyText 内部处理了非安全上下文（无 navigator.clipboard）的降级
+  await copyText(path.value);
 }
 </script>
 

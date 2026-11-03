@@ -16,6 +16,7 @@ import {
   getSubscriptionCalendarEventsApi,
   getSubscriptionCalendarWebcalUrlApi,
 } from '#/api/modules/subscription';
+import { copyText } from '#/utils/clipboard';
 import {
   resolveMediaPoster,
   resolveMediaPosterPosition,
@@ -188,11 +189,11 @@ async function openWebcalSetting() {
 async function copyHttpCalLink() {
   await ensureCalendarLinks();
   if (!httpCalLink.value) return;
-  try {
-    await navigator.clipboard.writeText(httpCalLink.value);
+  // 非安全上下文（http://<NAS-IP>）没有 navigator.clipboard，需带兜底
+  if (await copyText(httpCalLink.value)) {
     notification.success('已复制 HTTP 订阅链接');
-  } catch {
-    notification.error('复制失败');
+  } else {
+    notification.error('复制失败，请手动复制');
   }
 }
 

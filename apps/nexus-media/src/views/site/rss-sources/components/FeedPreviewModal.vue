@@ -18,6 +18,8 @@ import {
   useMessage,
 } from 'naive-ui';
 
+import { copyText } from '#/utils/clipboard';
+
 const props = defineProps<{
   show: boolean;
   loading: boolean;
@@ -50,8 +52,12 @@ function formatDate(value: number | string) {
 
 async function copyLink(item: CustomRssFeedItem) {
   if (!item.enclosure) return;
-  await navigator.clipboard.writeText(item.enclosure);
-  message.success('下载地址已复制');
+  // 非安全上下文（http://<NAS-IP>）没有 navigator.clipboard，需带兜底
+  if (await copyText(item.enclosure)) {
+    message.success('下载地址已复制');
+  } else {
+    message.error('复制失败，请手动复制');
+  }
 }
 </script>
 

@@ -29,6 +29,7 @@ import {
   updateAPIKeyApi,
 } from '#/api';
 import PageHeader from '#/components/page/PageHeader.vue';
+import { copyText } from '#/utils/clipboard';
 
 const message = useMessage();
 
@@ -191,10 +192,13 @@ async function handleCreate() {
   }
 }
 
-function copyKey() {
-  navigator.clipboard
-    .writeText(createdKey.value)
-    .then(() => message.success('已复制'));
+async function copyKey() {
+  // 非安全上下文（http://<NAS-IP>）没有 navigator.clipboard，需带兜底
+  if (await copyText(createdKey.value)) {
+    message.success('已复制');
+  } else {
+    message.error('复制失败，请手动复制');
+  }
 }
 
 function openEdit(row: any) {
