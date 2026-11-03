@@ -9,6 +9,7 @@ import MarkdownIt from 'markdown-it';
 import { NButton, NModal, NSpin, NTooltip, useMessage } from 'naive-ui';
 
 import { readAgentDoc } from '#/api/modules/agent';
+import { copyText } from '#/utils/clipboard';
 
 const props = defineProps<{
   attachments?: AgentApi.ChatAttachment[];
@@ -36,11 +37,11 @@ const message = useMessage();
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 
 async function copyContent() {
-  try {
-    await navigator.clipboard.writeText(props.content);
+  // 经 http://<NAS-IP> 访问时 navigator.clipboard 不存在，必须走带兜底的 copyText
+  if (await copyText(props.content)) {
     message.success('已复制回答');
-  } catch {
-    message.error('复制失败');
+  } else {
+    message.error('复制失败，请手动选中复制');
   }
 }
 

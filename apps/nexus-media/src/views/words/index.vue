@@ -28,6 +28,7 @@ import {
   toggleWordsApi,
 } from '#/api';
 import PageHeader from '#/components/page/PageHeader.vue';
+import { copyText } from '#/utils/clipboard';
 
 interface WordItem {
   id: number;
@@ -336,9 +337,14 @@ async function handleExport(group: WordGroup) {
   }
 }
 
-function copyExportCode() {
-  navigator.clipboard.writeText(exportCode.value);
-  message.success('已复制到剪贴板');
+async function copyExportCode() {
+  // 旧实现无条件提示成功：非安全上下文（http://<NAS-IP> 没有 navigator.clipboard）
+  // 时实际没复制成功，用户会以为已复制
+  if (await copyText(exportCode.value)) {
+    message.success('已复制到剪贴板');
+  } else {
+    message.error('复制失败，请手动复制');
+  }
 }
 
 function toggleCollapse(gid: string) {

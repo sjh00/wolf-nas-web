@@ -22,6 +22,7 @@ import {
 import EmptyState from '#/components/empty/EmptyState.vue';
 import MediaPoster from '#/components/media/MediaPoster.vue';
 import { useDownloadStore } from '#/store';
+import { copyText } from '#/utils/clipboard';
 
 const downloadStore = useDownloadStore();
 const message = useMessage();
@@ -116,32 +117,11 @@ function handlePageChange(page: number) {
 
 async function copyLink(url: string) {
   if (!url) return;
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(url);
-      message.success('下载链接已复制');
-      return;
-    }
-    throw new Error('clipboard unavailable');
-  } catch {
-    // 降级：非安全上下文 / 权限被拒时用 execCommand('copy') 兜底
-    const textarea = document.createElement('textarea');
-    textarea.value = url;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.append(textarea);
-    textarea.focus();
-    textarea.select();
-    textarea.setSelectionRange(0, url.length);
-    let ok = false;
-    try {
-      ok = document.execCommand('copy');
-    } catch {
-      // execCommand 抛错时保持 false
-    }
-    textarea.remove();
-    if (ok) message.success('下载链接已复制');
-    else message.error('复制失败，请手动复制');
+  // copyText 内部已处理「非安全上下文没有 navigator.clipboard」并降级到 execCommand
+  if (await copyText(url)) {
+    message.success('下载链接已复制');
+  } else {
+    message.error('复制失败，请手动复制');
   }
 }
 

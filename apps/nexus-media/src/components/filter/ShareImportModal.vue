@@ -6,6 +6,7 @@ import { IconifyIcon } from '@vben/icons';
 import { NButton, NInput, NModal, NSpace } from 'naive-ui';
 
 import { importFilterGroupApi } from '#/api/modules/filter';
+import { copyText } from '#/utils/clipboard';
 import { useAppNotification } from '#/utils/notify';
 
 const props = defineProps<{
@@ -48,16 +49,14 @@ async function handleImport() {
   }
 }
 
-function handleCopy() {
+async function handleCopy() {
   if (!localShareContent.value) return;
-  navigator.clipboard
-    .writeText(localShareContent.value)
-    .then(() => {
-      notification.success('已复制到剪贴板');
-    })
-    .catch(() => {
-      notification.error('复制失败');
-    });
+  // 非安全上下文（http://<NAS-IP>）没有 navigator.clipboard，需带兜底
+  if (await copyText(localShareContent.value)) {
+    notification.success('已复制到剪贴板');
+  } else {
+    notification.error('复制失败，请手动选中复制');
+  }
 }
 </script>
 

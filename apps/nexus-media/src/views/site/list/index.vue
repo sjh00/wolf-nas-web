@@ -38,6 +38,7 @@ import {
 import EmptyState from '#/components/empty/EmptyState.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
 import { useSiteStore } from '#/store';
+import { copyText } from '#/utils/clipboard';
 import { useAppNotification } from '#/utils/notify';
 
 import SiteBatchTestModal from './components/SiteBatchTestModal.vue';
@@ -189,7 +190,7 @@ function formatHealthIssues(issues: unknown[]): string {
     .join('；');
 }
 
-function copyParseHealthFeedback(row: {
+async function copyParseHealthFeedback(row: {
   site_name: string;
   status: string;
   issues: string[];
@@ -203,10 +204,12 @@ function copyParseHealthFeedback(row: {
         `请检查站点定义（HTML 选择器 / API 字段）是否因页面改版失效，并提交修复到\n` +
         `https://github.com/linyuan0213/nexus-media-sites\n` +
         `（站点类型: html / api，配置路径: config/sites/ 下对应 json）`;
-  navigator.clipboard
-    .writeText(text)
-    .then(() => message.success('问题反馈文本已复制'))
-    .catch(() => message.warning('复制失败，请手动复制'));
+  // 非安全上下文（http://<NAS-IP>）没有 navigator.clipboard，需带兜底
+  if (await copyText(text)) {
+    message.success('问题反馈文本已复制');
+  } else {
+    message.warning('复制失败，请手动复制');
+  }
 }
 
 const sourceOptions = [
