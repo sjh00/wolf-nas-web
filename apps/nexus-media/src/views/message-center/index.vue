@@ -72,6 +72,7 @@ interface Message {
   role: 'assistant' | 'system' | 'user';
   content: string;
   image?: string;
+  contentProfile?: string;
   items?: AgentApi.ListItem[];
   reasoning?: string;
   url?: string;
@@ -569,6 +570,7 @@ function startMessageStream() {
           backendId: item.id ?? item.cursor,
           content: content ? `${title}\n${content}` : title,
           image: item.image || '',
+          contentProfile: item.content_profile || '',
           items: item.items || [],
           url: item.url || '',
           read: item.read === false ? false : true,
@@ -1014,7 +1016,7 @@ async function restoreTimeline() {
     // 会话历史不可用时忽略
   }
   try {
-    const res: any = await getMessageHistory(200);
+    const res: any = await getMessageHistory(50);
     const list: AgentApi.MessageStreamItem[] = res?.messages || [];
     if (list.length > 0 && streamCursor) {
       streamCursor = Math.max(...list.map((m) => m.cursor));
@@ -1029,6 +1031,7 @@ async function restoreTimeline() {
         backendId: item.id ?? item.cursor,
         content: content ? `${title}\n${content}` : title,
         image: item.image || '',
+        contentProfile: item.content_profile || '',
         items: item.items || [],
         url: item.url || '',
         read: item.read !== false,
@@ -1379,6 +1382,7 @@ function onVisibilityChange() {
                   :role="msg.role"
                   :content="msg.content"
                   :image="msg.image"
+                  :content-profile="msg.contentProfile"
                   :items="msg.items"
                   :url="msg.url"
                   :tool-events="msg.toolEvents"

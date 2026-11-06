@@ -1,5 +1,5 @@
 export interface SiteForm {
-  id?: number;
+  id?: number | string;
   name: string;
   pri: string;
   signurl: string;
@@ -28,13 +28,16 @@ export interface SiteForm {
   search_enabled: boolean;
 }
 
+export type SiteId = number | string;
+
 export interface SiteItem {
-  id: number;
+  id: SiteId;
   name: string;
   display_name?: string;
   source_label?: string;
   source_icon?: string;
   pri?: number | string;
+  priority?: number;
   signurl?: string;
   rssurl?: string;
   cookie?: string;
@@ -82,4 +85,22 @@ export interface SiteDefinition {
   domain_aliases: string[];
   encoding: string;
   detail_page_url: string;
+}
+
+/** 站点是否为公开/BT：手动覆盖(note.public) > 站点定义 > 运行时推断。 */
+export function isPublicSite(
+  site: Pick<SiteItem, 'note' | 'public' | 'site_public'>,
+): boolean {
+  let note: any = site.note;
+  if (typeof note === 'string') {
+    try {
+      note = JSON.parse(note);
+    } catch {
+      note = undefined;
+    }
+  }
+  const explicit = note && typeof note === 'object' ? note.public : undefined;
+  if (typeof explicit === 'boolean') return explicit;
+  if (typeof site.site_public === 'boolean') return site.site_public;
+  return site.public === true;
 }

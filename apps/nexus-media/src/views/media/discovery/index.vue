@@ -80,7 +80,8 @@ const pageTitleMap: Record<string, string> = {
 };
 
 const routePreset: Record<string, { feed?: string; provider?: string }> = {
-  Ranking: { feed: 'movie_showing', provider: 'douban' },
+  DiscoveryAll: { feed: 'trending', provider: 'tmdb' },
+  Ranking: { feed: 'trending', provider: 'tmdb' },
   Bangumi: { feed: 'calendar', provider: 'bangumi' },
   DoubanMovie: { feed: 'movie_hot_gaia', provider: 'douban' },
   DoubanTv: { feed: 'tv_hot', provider: 'douban' },
@@ -92,11 +93,30 @@ const pageTitle = computed(() => pageTitleMap[String(route.name)] || '探索');
 const activeSource = computed(() =>
   sources.value.find((item) => item.provider === activeProvider.value),
 );
+const SOURCE_PRIORITY = [
+  'tmdb',
+  'douban',
+  'bangumi',
+  'javdb',
+  'javalibrary',
+  'javbus',
+  'fc2',
+  'miss_av',
+  'theporndb',
+];
+
+function sourceRank(provider: string) {
+  const rank = SOURCE_PRIORITY.indexOf(provider);
+  return rank === -1 ? SOURCE_PRIORITY.length : rank;
+}
+
 const orderedSources = computed(() =>
-  [...sources.value].sort(
-    (a, b) =>
-      Number(a.visibility === 'private') - Number(b.visibility === 'private'),
-  ),
+  [...sources.value].sort((a, b) => {
+    const visibilityDiff =
+      Number(a.visibility === 'private') - Number(b.visibility === 'private');
+    if (visibilityDiff !== 0) return visibilityDiff;
+    return sourceRank(a.provider) - sourceRank(b.provider);
+  }),
 );
 const feeds = computed(() => activeSource.value?.feeds || []);
 const feedsExpanded = ref(false);
@@ -574,7 +594,7 @@ function itemVote(item: DiscoveryApi.Item) {
 }
 
 function handleSearchFromCard(item: Record<string, any>) {
-  // 榜单真实来源（javdb/javalibrary/douban）和内部身份锚点（content_id）是两回事。
+  // 榜单真实来源和内部身份锚点是两回事。
   const sourceProvider = String(item.provider || '').trim();
   const anchorProvider = String(item.anchorProvider || sourceProvider).trim();
   const externalId = String(item.anchorExternalId || '').trim();

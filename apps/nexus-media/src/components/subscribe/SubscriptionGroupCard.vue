@@ -71,8 +71,12 @@ function stateMeta(item: Record<string, any>) {
 }
 
 const seasonLabel = computed(() => {
-  const s = props.season;
-  return s && s !== 'S00' ? String(s) : '';
+  const raw = String(props.season || '').trim();
+  if (!raw || raw === 'S00' || raw === '0') return '';
+  const num = Number(raw.replace(/^S/i, ''));
+  return Number.isFinite(num) && num > 0
+    ? `S${String(num).padStart(2, '0')}`
+    : raw;
 });
 
 const voteText = computed(() => {
@@ -340,6 +344,12 @@ onMounted(ensureOutsideListener);
               <div class="sgc-sub-user-text">
                 <span class="sgc-username" :title="usernameOf(item)">
                   {{ usernameOf(item) }}
+                </span>
+                <span
+                  v-if="props.type !== 'movie' && item.season"
+                  class="sgc-season"
+                >
+                  {{ item.season }}
                 </span>
                 <span class="sgc-sub-state">
                   <span
@@ -687,6 +697,16 @@ onMounted(ensureOutsideListener);
   font-weight: 600;
   color: hsl(var(--card-foreground));
   white-space: nowrap;
+}
+
+.sgc-season {
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: hsl(var(--primary));
+  white-space: nowrap;
+  background: hsl(var(--primary) / 12%);
+  border-radius: 4px;
 }
 
 .sgc-sub-state {

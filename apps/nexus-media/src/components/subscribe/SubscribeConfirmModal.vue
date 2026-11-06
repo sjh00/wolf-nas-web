@@ -19,9 +19,15 @@ import {
   getTvSeasonListApi,
 } from '#/api/modules/media';
 import { getVisibleSitesApi } from '#/api/modules/site';
-import { getSubscribedSeasonsApi } from '#/api/modules/subscription';
+import {
+  getDefaultSubscriptionSettingApi,
+  getSubscribedSeasonsApi,
+} from '#/api/modules/subscription';
 import MediaPoster from '#/components/media/MediaPoster.vue';
-import { getContentProfileLabel } from '#/plugin-framework';
+import {
+  getContentProfileForSource,
+  getContentProfileLabel,
+} from '#/plugin-framework';
 
 export interface SubscribeConfirmItem {
   id: string;
@@ -59,9 +65,47 @@ const emit = defineEmits<{
   (e: 'edit'): void;
 }>();
 
+const CN_SEASON: Record<string, number> = {
+  一: 1,
+  二: 2,
+  两: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+  十: 10,
+};
+
+function parseTitleSeason(title: string): number {
+  const text = String(title || '');
+  const cn = text.match(/第\s*([一二两三四五六七八九十]|\d{1,2})\s*季/);
+  if (cn) {
+    const raw = cn[1]!;
+    return CN_SEASON[raw] || Number.parseInt(raw, 10) || 0;
+  }
+  const en = text.match(/(?:\bS|Season\s*)(\d{1,2})\b/i);
+  return en ? Number.parseInt(en[1]!, 10) || 0 : 0;
+}
+
+const effectiveProfile = computed(() => {
+  if (!props.item) return '';
+  const profile = String(props.item.content_profile || '').trim();
+  if (profile && profile !== 'default') return profile;
+  const source = String(
+    props.item.provider ||
+      props.item.anchor_provider ||
+      String(props.item.metadata_ref || '').split(':')[0] ||
+      '',
+  );
+  return getContentProfileForSource(source);
+});
+
 const typeLabel = computed(() => {
   if (!props.item) return '';
-  const profile = props.item.content_profile;
+  const profile = effectiveProfile.value;
   if (profile && profile !== 'default') {
     return getContentProfileLabel(profile) || profile.toUpperCase();
   }
@@ -88,19 +132,43 @@ const policyOptions = [
   { label: 'Bangumi 为主', value: 'bangumi_primary' },
 ];
 const subscribedSeasons = ref<number[]>([]);
-// 当前将使用的站点（未配置 = 全部已授权站点）
+// 优先展示默认订阅配置；未配置时才回退全部已授权站点
 const siteSummary = ref<{ rss: number; search: number }>({ rss: 0, search: 0 });
+const usingDefaultSites = ref(false);
 
 async function loadSiteSummary() {
   try {
     const res: any = await getVisibleSitesApi();
     const list = Array.isArray(res) ? res : res?.data || [];
-    siteSummary.value = {
-      search: list.filter((i: any) => (i.permissions || []).includes('search'))
-        .length,
-      rss: list.filter((i: any) => (i.permissions || []).includes('rss'))
-        .length,
-    };
+    const allSearch = list.filter((i: any) =>
+      (i.permissions || []).includes('search'),
+    ).length;
+    const allRss = list.filter((i: any) =>
+      (i.permissions || []).includes('rss'),
+    ).length;
+    let search = allSearch;
+    let rss = allRss;
+    usingDefaultSites.value = false;
+    if (props.item) {
+      const mtype = props.item.type === 'movie' ? 'movie' : 'tv';
+      const defaults: any = await getDefaultSubscriptionSettingApi(
+        mtype,
+        effectiveProfile.value || undefined,
+      );
+      const setting = defaults?.data || defaults || {};
+      const defaultSearch = Array.isArray(setting.search_sites)
+        ? setting.search_sites
+        : [];
+      const defaultRss = Array.isArray(setting.rss_sites)
+        ? setting.rss_sites
+        : [];
+      if (defaultSearch.length > 0 || defaultRss.length > 0) {
+        usingDefaultSites.value = true;
+        search = defaultSearch.length || allSearch;
+        rss = defaultRss.length || allRss;
+      }
+    }
+    siteSummary.value = { search, rss };
   } catch {
     siteSummary.value = { rss: 0, search: 0 };
   }
@@ -161,6 +229,8 @@ watch(
               'tv',
               props.item.content_profile,
               props.item.id,
+              props.item.title,
+              props.item.year,
             );
             const list = Array.isArray(detail?.seasons) ? detail.seasons : [];
             seasons.value = list
@@ -177,15 +247,68 @@ watch(
         }
       }
       // 未获取到季信息时（非 TMDB 来源或接口失败），默认提供第一季
+      const parsedTitleSeason = parseTitleSeason(
+        String(props.item?.title || ''),
+      );
+      if (isTv.value && parsedTitleSeason > 0) {
+        const fallbackEpisodeCount = seasons.value.find(
+          (s: any) => Number(s.episode_count) > 0,
+        )?.episode_count;
+        const onlyFirstSeason =
+          seasons.value.length === 0 ||
+          seasons.value.every((s: any) => Number(s.season_number) === 1);
+        if (parsedTitleSeason > 1 && onlyFirstSeason) {
+          // 豆瓣单季条目：来源只返回 S1，标题写的是第二/三季，直接替换，
+          // 不能再同时显示一个假的 S1。
+          seasons.value = [
+            {
+              name: `第${parsedTitleSeason}季`,
+              season_number: parsedTitleSeason,
+              episode_count: fallbackEpisodeCount,
+            },
+          ];
+        } else if (
+          !seasons.value.some(
+            (s: any) => Number(s.season_number) === parsedTitleSeason,
+          )
+        ) {
+          seasons.value.push({
+            name: `第${parsedTitleSeason}季`,
+            season_number: parsedTitleSeason,
+            episode_count: fallbackEpisodeCount,
+          });
+          seasons.value.sort(
+            (a: any, b: any) => a.season_number - b.season_number,
+          );
+        }
+        if (
+          selectedSeasons.value.length === 0 ||
+          (selectedSeasons.value.length === 1 &&
+            Number(selectedSeasons.value[0]) === 1 &&
+            parsedTitleSeason > 1)
+        ) {
+          selectedSeasons.value = [parsedTitleSeason];
+        }
+      }
       if (isTv.value && seasons.value.length === 0) {
         seasons.value = [{ season_number: 1, name: '第一季' }];
       }
       if (isTv.value && seasons.value.length > 0) {
-        // 已有订阅：预选中已订阅季（可取消或追加）；无订阅：默认选中第一季
+        // 已有订阅：预选中已订阅季（可取消或追加）；
+        // 无订阅：标题写了第二/三季时优先选中该季，否则选第一季。
+        const titleSeasonExists =
+          parsedTitleSeason > 0 &&
+          seasons.value.some(
+            (s: any) => Number(s.season_number) === parsedTitleSeason,
+          );
         selectedSeasons.value =
           subscribedSeasons.value.length > 0
             ? [...subscribedSeasons.value]
-            : [seasons.value[0]!.season_number];
+            : [
+                titleSeasonExists
+                  ? parsedTitleSeason
+                  : seasons.value[0]!.season_number,
+              ];
       }
       loading.value = false;
     }
@@ -357,8 +480,13 @@ function toggleSeason(num: number) {
         <span v-if="siteSummary.search === 0">
           暂无可用站点，请联系管理员为你授权站点
         </span>
+        <span v-else-if="usingDefaultSites">
+          将使用默认订阅配置（搜索 {{ siteSummary.search }} 个 · RSS
+          {{ siteSummary.rss }} 个），可在「修改配置」中调整
+        </span>
         <span v-else>
-          将使用全部已授权站点（搜索 {{ siteSummary.search }} 个 · RSS
+          默认订阅未配置站点，将使用全部已授权站点（搜索
+          {{ siteSummary.search }} 个 · RSS
           {{ siteSummary.rss }} 个），可在「修改配置」中指定
         </span>
       </div>

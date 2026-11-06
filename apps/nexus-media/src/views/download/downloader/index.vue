@@ -104,6 +104,11 @@ const SYNC_MODES = [
   { label: '移动', value: 'move' },
 ];
 
+function rmtModeLabel(value?: string): string {
+  const key = String(value || '').toLowerCase();
+  return SYNC_MODES.find((item) => item.value === key)?.label || value || '';
+}
+
 function downloaderIcon(type?: string): string {
   const conf = typeConf(type);
   if (conf?.icon_url) return conf.icon_url;
@@ -476,7 +481,7 @@ onMounted(fetchData);
                   background: hsl(var(--primary) / 20%);
                 "
               >
-                {{ item.rmt_mode_name || item.rmt_mode }}
+                {{ rmtModeLabel(item.rmt_mode_name || item.rmt_mode) }}
               </div>
               <div
                 v-if="item.only_wolf_nas === 1"

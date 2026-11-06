@@ -61,6 +61,8 @@ export interface SubscribeEditItem {
   current_ep?: number | string;
   rss_sites?: string[];
   search_sites?: string[];
+  default_rss_sites?: string[];
+  default_search_sites?: string[];
 }
 
 const props = defineProps<{
@@ -122,6 +124,11 @@ const form = ref({
 
 // 动漫与电视剧共用季/集相关表单项
 const isTv = computed(() => form.value.type !== 'movie');
+const allEpisodesDownloaded = computed(() => {
+  const total = Number(form.value.total_ep) || 0;
+  const current = Number(form.value.current_ep) || 0;
+  return total > 0 && current > total;
+});
 const isCustomProfile = computed(
   () =>
     !!form.value.content_profile && form.value.content_profile !== 'default',
@@ -131,6 +138,36 @@ const profileLabel = computed(
     getContentProfileLabel(form.value.content_profile) ||
     form.value.content_profile.toUpperCase(),
 );
+
+function siteLabels(
+  values: string[] | undefined,
+  options: { label: string; value: string }[],
+): string {
+  if (!Array.isArray(values) || values.length === 0) return '';
+  return values
+    .map(
+      (value) =>
+        options.find((option) => option.value === value)?.label || value,
+    )
+    .join('、');
+}
+
+const defaultRssHint = computed(() => {
+  const labels = siteLabels(props.item?.default_rss_sites, rssSites.value);
+  return labels
+    ? `当前使用默认订阅站点：${labels}`
+    : '未选择时默认使用全部已授权订阅站点';
+});
+
+const defaultSearchHint = computed(() => {
+  const labels = siteLabels(
+    props.item?.default_search_sites,
+    searchSites.value,
+  );
+  return labels
+    ? `当前使用默认搜索站点：${labels}`
+    : '未选择时默认使用全部已授权搜索站点';
+});
 
 watch([() => props.show, () => props.item], async ([visible, item]) => {
   if (visible && item) {
@@ -200,12 +237,15 @@ async function loadOptions() {
     rssSites.value = visibleSites
       .filter((s: any) => (s.permissions || []).includes('rss'))
       .map((s: any) => ({
-        label: s.source === 'custom_rss' ? `${s.name}（自定义 RSS）` : s.name,
+        label:
+          s.source === 'custom_rss'
+            ? `${s.display_name || s.name}（自定义 RSS）`
+            : s.display_name || s.name,
         value: s.value || s.name,
       }));
     searchSites.value = visibleSites
       .filter((s: any) => (s.permissions || []).includes('search'))
-      .map((s: any) => ({ label: s.name, value: s.name }));
+      .map((s: any) => ({ label: s.display_name || s.name, value: s.name }));
     const rules = Array.isArray(rulesRes) ? rulesRes : rulesRes?.data || [];
     filterRules.value = [
       { label: '站点规则', value: '' },
@@ -382,8 +422,16 @@ function handleConfirm() {
               </NFormItem>
               <NFormItem label="开始集数">
                 <NInput
-                  v-model:value="form.current_ep"
+                  :value="
+                    allEpisodesDownloaded ? '已全部下载' : form.current_ep
+                  "
+                  :disabled="allEpisodesDownloaded"
                   placeholder="开始订阅集数"
+                  @update:value="
+                    (value) => {
+                      if (!allEpisodesDownloaded) form.current_ep = value;
+                    }
+                  "
                 />
               </NFormItem>
             </div>
@@ -530,7 +578,7 @@ function handleConfirm() {
               v-else-if="form.rss_sites.length === 0"
               class="site-empty-hint"
             >
-              未选择时默认使用全部已授权订阅站点
+              {{ defaultRssHint }}
             </div>
           </div>
         </div>
@@ -585,7 +633,7 @@ function handleConfirm() {
               v-else-if="form.search_sites.length === 0"
               class="site-empty-hint"
             >
-              未选择时默认使用全部已授权搜索站点
+              {{ defaultSearchHint }}
             </div>
           </div>
         </div>

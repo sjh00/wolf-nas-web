@@ -24,7 +24,6 @@ import {
   lookupMetadataApi,
   searchMediaApi,
   searchMetadataApi,
-  webSearchApi,
 } from '#/api/modules/media';
 import {
   addSubscriptionApi,
@@ -218,6 +217,9 @@ interface SubscriptionGroup {
 }
 
 function groupKey(item: any): string {
+  if (props.mediaType === 'tv' && item.series_key) {
+    return `series:${item.series_key}`;
+  }
   const identity = item.identity_id
     ? `id:${item.identity_id}`
     : item.anchor_provider && item.anchor_external_id
@@ -240,7 +242,7 @@ const groups = computed<SubscriptionGroup[]>(() => {
     } else {
       map.set(key, {
         key,
-        name: item.name || '',
+        name: item.series_title || item.name || '',
         year: item.year || '',
         season: item.season || '',
         image: item.image || '',
@@ -248,6 +250,10 @@ const groups = computed<SubscriptionGroup[]>(() => {
         items: [item],
       });
     }
+  }
+  for (const group of map.values()) {
+    const seasons = new Set(group.items.map((item: any) => item.season || ''));
+    if (seasons.size > 1) group.season = '';
   }
   return [...map.values()];
 });
@@ -387,7 +393,7 @@ function handleCardClick(item: any) {
   router.push({
     name: 'MediaDetail',
     query: {
-      type: props.mediaType === 'movie' ? 'movie' : item.type || 'tv',
+      type: item.type || (props.mediaType === 'movie' ? 'movie' : 'tv'),
       id: item.tmdbid,
     },
   });
@@ -398,49 +404,35 @@ async function handleCardSearch(item: any) {
     notification.warning('缺少名称，无法搜索');
     return;
   }
-  try {
-    const resp: any = await webSearchApi({
-      search_word: item.keyword || item.name,
-      media_type: props.mediaType === 'movie' ? 'movie' : item.type || 'tv',
-      ...(item.anchor_provider && item.anchor_external_id
-        ? {
-            anchor_provider: item.anchor_provider,
-            anchor_external_id: item.anchor_external_id,
-            content_profile: item.content_profile || effectiveProfile.value,
-          }
-        : { tmdbid: item.tmdbid ? String(item.tmdbid) : undefined }),
-      filters: {
-        content_profile: item.content_profile || effectiveProfile.value,
-        metadata_source: item.provider || item.anchor_provider || undefined,
-        anchor_provider: item.anchor_provider || undefined,
-        anchor_external_id: item.anchor_external_id || undefined,
-      },
-    });
-    const sessionId = resp?.session_id || '';
-    const sidParam = sessionId
-      ? `&session_id=${encodeURIComponent(sessionId)}`
-      : '';
-    const profileParam =
-      activeProfile.value &&
-      activeProfile.value !== 'default' &&
-      activeProfile.value !== 'all'
-        ? `&content_profile=${encodeURIComponent(activeProfile.value)}`
-        : '';
-    router.push(
-      `/media/search?s=${encodeURIComponent(item.keyword || item.name)}&from=subscription${sidParam}&media_type=${props.mediaType}${profileParam}`,
-    );
-  } catch (error: any) {
-    notification.error('搜索失败', { description: error?.message || '' });
+  // 与排行榜一致：不在订阅页预建搜索会话，交给搜索页按订阅默认站点发起，
+  // 否则 session_id 会让搜索页跳过 syncSitesFromSubscriptionDefault。
+  const params = new URLSearchParams({
+    s: item.keyword || item.name,
+    from: 'subscription',
+    media_type: item.type || (props.mediaType === 'movie' ? 'movie' : 'tv'),
+  });
+  if (item.tmdbid) params.set('tmdbid', String(item.tmdbid));
+  if (item.metadata_ref) params.set('metadata_ref', item.metadata_ref);
+  if (item.anchor_provider) {
+    params.set('metadata_source', item.provider || item.anchor_provider);
+    params.set('anchor_provider', item.anchor_provider);
   }
+  if (item.anchor_external_id) {
+    params.set('anchor_external_id', item.anchor_external_id);
+  }
+  const profile = item.content_profile || effectiveProfile.value;
+  if (profile) params.set('content_profile', profile);
+  router.push(`/media/search?${params.toString()}`);
 }
 
 async function handleCardRefresh(item: any) {
   if (refreshing.value) return;
   refreshing.value = true;
+  const rssid = item.rssid ?? item.id;
   try {
     await refreshSubscriptionApi(
       props.mediaType,
-      String(item.id),
+      String(rssid),
       activeProfile.value,
     );
     notification.success('已触发刷新');
@@ -448,7 +440,7 @@ async function handleCardRefresh(item: any) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await fetchData();
       const current = items.value.find(
-        (entry: any) => String(entry.id) === String(item.id),
+        (entry: any) => String(entry.rssid ?? entry.id) === String(rssid),
       );
       if (current && String(current.state) !== String(item.state)) break;
     }
@@ -462,9 +454,10 @@ async function handleCardRefresh(item: any) {
 // ---------- 编辑 ----------
 async function handleEdit(item: any) {
   let detail: any;
+  const rssid = item.rssid ?? item.id;
   try {
     const res: any = await getSubscriptionDetailApi(
-      item.id,
+      rssid,
       props.mediaType === 'movie' ? 'movie' : item.type || 'tv',
       item.content_profile || effectiveProfile.value,
     );
@@ -478,8 +471,25 @@ async function handleEdit(item: any) {
     detail.anchor_external_id || item.anchor_external_id || '';
   const profile =
     detail.content_profile || item.content_profile || effectiveProfile.value;
+  let defaults: any = {};
+  if (
+    !Array.isArray(detail.rss_sites) ||
+    !Array.isArray(detail.search_sites) ||
+    detail.rss_sites.length === 0 ||
+    detail.search_sites.length === 0
+  ) {
+    try {
+      const res: any = await getDefaultSubscriptionSettingApi(
+        props.mediaType,
+        profile,
+      );
+      defaults = res?.data || res || {};
+    } catch {
+      // 默认设置读取失败时仍展示订阅自身字段
+    }
+  }
   editItem.value = {
-    rssid: String(detail.id || item.id),
+    rssid: String(detail.id || detail.rssid || rssid || ''),
     name: detail.name || item.name || '',
     year: detail.year || item.year || '',
     type: type === 'anime' ? 'anime' : type === 'movie' ? 'movie' : 'tv',
@@ -524,8 +534,26 @@ async function handleEdit(item: any) {
       detail.current_ep === null || detail.current_ep === undefined
         ? ''
         : String(detail.current_ep),
-    rss_sites: Array.isArray(detail.rss_sites) ? detail.rss_sites : [],
-    search_sites: Array.isArray(detail.search_sites) ? detail.search_sites : [],
+    // 编辑态必须把“当前生效值”装进表单：未显式保存站点时用默认站点预选，
+    // 否则用户看到的卡片与编辑表单不一致，也无法直接修改默认站点。
+    rss_sites:
+      Array.isArray(detail.rss_sites) && detail.rss_sites.length > 0
+        ? detail.rss_sites
+        : Array.isArray(defaults.rss_sites)
+          ? defaults.rss_sites
+          : [],
+    search_sites:
+      Array.isArray(detail.search_sites) && detail.search_sites.length > 0
+        ? detail.search_sites
+        : Array.isArray(defaults.search_sites)
+          ? defaults.search_sites
+          : [],
+    default_rss_sites: Array.isArray(defaults.rss_sites)
+      ? defaults.rss_sites
+      : [],
+    default_search_sites: Array.isArray(defaults.search_sites)
+      ? defaults.search_sites
+      : [],
   };
   editShow.value = true;
 }
@@ -570,7 +598,7 @@ async function confirmDelete() {
             ? 'anime'
             : 'tv',
       year: String(target.year || ''),
-      rssid: String(target.id),
+      rssid: String(target.rssid ?? target.id),
       content_profile: target.content_profile || effectiveProfile.value,
     });
     const deleted = Number(res?.deleted ?? res?.data?.deleted ?? 1);
@@ -886,7 +914,7 @@ onUnmounted(() => {
         <div v-else class="subscription-flow">
           <SubscriptionHoverCard
             v-for="item in items"
-            :key="item.id"
+            :key="item.rssid ?? item.id"
             :item="item"
             :type="resolveItemType(item)"
             :type-label="customActive ? activeProfileLabel : ''"
