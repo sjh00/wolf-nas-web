@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router';
 
 import { IconifyIcon } from '@vben/icons';
 
+import { useMediaQuery } from '@vueuse/core';
 import { NButton, NModal } from 'naive-ui';
 
 import {
@@ -16,10 +17,14 @@ import {
   getDefaultSubscriptionSettingApi,
   removeSubscriptionApi,
 } from '#/api/modules/subscription';
+import MediaCardActions from '#/components/media/MediaCardActions.vue';
 import MediaPoster from '#/components/media/MediaPoster.vue';
 import SubscribeConfirmModal from '#/components/subscribe/SubscribeConfirmModal.vue';
 import SubscribeEditModal from '#/components/subscribe/SubscribeEditModal.vue';
-import { getContentProfileLabel } from '#/plugin-framework';
+import {
+  getContentProfileForSource,
+  getContentProfileLabel,
+} from '#/plugin-framework';
 import { useAppNotification } from '#/utils/notify';
 
 interface Props {
@@ -53,6 +58,7 @@ const router = useRouter();
 const notification = useAppNotification();
 
 const hovered = ref(false);
+const isTouch = useMediaQuery('(hover: none), (max-width: 1023px)');
 const subscribeShow = ref(false);
 const subscribeItem = ref<null | SubscribeConfirmItem>(null);
 const subscribeEditShow = ref(false);
@@ -75,12 +81,21 @@ watch(
   },
 );
 
+const effectiveProfile = computed(() => {
+  const profile = String(props.contentProfile || '').trim();
+  if (profile && profile !== 'default') return profile;
+  const source = String(
+    props.anchorProvider || String(props.metadataRef || '').split(':')[0] || '',
+  );
+  return getContentProfileForSource(source);
+});
+
 const typeLabel = computed(() => {
   // 自定义画像优先使用插件标签；插件前端未就绪时也不回落成“电影”
-  if (props.contentProfile && props.contentProfile !== 'default') {
+  if (effectiveProfile.value) {
     return (
-      getContentProfileLabel(props.contentProfile) ||
-      props.contentProfile.toUpperCase()
+      getContentProfileLabel(effectiveProfile.value) ||
+      effectiveProfile.value.toUpperCase()
     );
   }
   const t = props.mediaType || props.type || '';
@@ -155,13 +170,13 @@ function goDetail() {
   });
 }
 
-function handleSearch(e: Event) {
-  e.stopPropagation();
+function handleSearch(e?: Event) {
+  e?.stopPropagation();
   emit('search', props);
 }
 
-function handleSubscribe(e: Event) {
-  e.stopPropagation();
+function handleSubscribe(e?: Event) {
+  e?.stopPropagation();
   if (inLibrary.value) return;
   // 电影已订阅 → 取消订阅；电视剧已订阅 → 仍打开季选择框以追加其他季
   if (subscribed.value && !isTvType.value && _rssid.value) {
@@ -179,7 +194,7 @@ function handleSubscribe(e: Event) {
     type: isTvType.value ? 'tv' : 'movie',
     image: props.poster,
     overview: props.overview,
-    content_profile: props.contentProfile,
+    content_profile: effectiveProfile.value,
     metadata_ref: props.metadataRef,
     provider: props.anchorProvider,
   };
@@ -452,10 +467,17 @@ async function handleConfirmEdit(data: Record<string, any>) {
           {{ metaTags.join(' · ') }}
         </span>
       </div>
+      <MediaCardActions
+        v-if="isTouch"
+        :subscribed="subscribed"
+        :in-library="inLibrary"
+        @search="handleSearch"
+        @subscribe="handleSubscribe"
+      />
     </div>
 
     <div
-      v-if="hovered"
+      v-if="hovered && !isTouch"
       class="absolute inset-0 flex flex-col items-center justify-center gap-2"
       style="background: rgb(0 0 0 / 50%)"
     >

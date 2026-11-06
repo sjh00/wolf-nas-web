@@ -311,6 +311,23 @@ export function getContentProfilePosterPosition(key?: null | string): string {
   return contentProfiles[key]?.posterPosition || '';
 }
 
+export function getContentProfileForSource(source?: null | string): string {
+  const value = String(source || '')
+    .trim()
+    .toLowerCase();
+  if (!value) return '';
+  for (const [key, profile] of Object.entries(contentProfiles)) {
+    if (
+      (profile.searchSources || []).some(
+        (item) => String(item.value).toLowerCase() === value,
+      )
+    ) {
+      return key;
+    }
+  }
+  return '';
+}
+
 export function getContentProfileDefaultSearchSource(
   key?: null | string,
 ): string {
@@ -605,6 +622,9 @@ export async function loadPluginFrontend(
     pluginFrontendVersions.set(plugin.id, plugin.version || '');
   }
 
+  // 画像标签/搜索源只依赖 manifest，先注册，避免 ESM 加载失败导致页面回退成电影。
+  registerContentProfiles(plugin);
+
   try {
     // 如果有前端组件，先 import ESM 模块
     const hasComponents =
@@ -636,8 +656,6 @@ export async function loadPluginFrontend(
         Object.keys(components || {}),
       );
     }
-
-    registerContentProfiles(plugin);
 
     // 注册路由
     if (plugin.frontend.routes?.length > 0) {
@@ -781,6 +799,8 @@ export function unloadPluginFrontend(pluginId: string): void {
   for (const key of pluginProfileKeys.get(pluginId) || []) {
     delete contentProfiles[key];
     contentProfileImageTransformers.delete(key);
+    contentProfileMessageImageTransformers.delete(key);
+    pendingSearchSources.delete(key);
   }
   pluginProfileKeys.delete(pluginId);
 

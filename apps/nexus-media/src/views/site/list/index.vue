@@ -45,12 +45,13 @@ import SiteBatchTestModal from './components/SiteBatchTestModal.vue';
 import SiteCard from './components/SiteCard.vue';
 import SiteDeleteModal from './components/SiteDeleteModal.vue';
 import SiteEditModal from './components/SiteEditModal.vue';
+import { isPublicSite } from './types';
 
 const siteStore = useSiteStore();
 const notification = useAppNotification();
 const loading = ref(false);
 const syncLoading = ref(false);
-const testLoading = ref<null | number>(null);
+const testLoading = ref<null | number | string>(null);
 const activeSource = ref('all');
 const activeType = ref('all');
 const searchKeyword = ref('');
@@ -212,12 +213,28 @@ async function copyParseHealthFeedback(row: {
   }
 }
 
-const sourceOptions = [
+const baseSourceOptions = [
   { key: 'all', label: '全部来源', icon: 'lucide:layers' },
   { key: 'builtin', label: '内置索引器', icon: 'lucide:database' },
   { key: 'jackett', label: 'Jackett', icon: 'lucide:search' },
   { key: 'prowlarr', label: 'Prowlarr', icon: 'lucide:scan-search' },
 ];
+
+const sourceOptions = computed(() => {
+  const options = [...baseSourceOptions];
+  const known = new Set(options.map((item) => item.key));
+  for (const site of siteStore.sites) {
+    const source = site.source || 'builtin';
+    if (known.has(source)) continue;
+    known.add(source);
+    options.push({
+      key: source,
+      label: site.source_label || source,
+      icon: site.source_icon || 'lucide:search',
+    });
+  }
+  return options;
+});
 
 const typeOptions = [
   { label: '全部', value: 'all' },
@@ -234,8 +251,8 @@ const filteredSites = computed(() => {
   }
   if (activeType.value !== 'all') {
     list = list.filter((s: any) => {
-      if (activeType.value === 'bt') return s.site_public ?? s.public;
-      return !(s.site_public ?? s.public);
+      if (activeType.value === 'bt') return isPublicSite(s);
+      return !isPublicSite(s);
     });
   }
   const kw = searchKeyword.value.trim().toLowerCase();
@@ -253,7 +270,9 @@ const filteredSites = computed(() => {
 
 const groupedSites = computed(() => {
   if (activeSource.value !== 'all') {
-    const option = sourceOptions.find((o) => o.key === activeSource.value);
+    const option = sourceOptions.value.find(
+      (o) => o.key === activeSource.value,
+    );
     return [
       {
         source: activeSource.value,
@@ -266,7 +285,9 @@ const groupedSites = computed(() => {
   }
 
   const groups: Record<string, SiteItem[]> = {};
-  const orderedSources = ['builtin', 'jackett', 'prowlarr'];
+  const orderedSources = sourceOptions.value
+    .map((option) => option.key)
+    .filter((key) => key !== 'all');
   for (const source of orderedSources) {
     groups[source] = [];
   }
@@ -278,7 +299,7 @@ const groupedSites = computed(() => {
 
   return orderedSources
     .map((source) => {
-      const option = sourceOptions.find((o) => o.key === source);
+      const option = sourceOptions.value.find((o) => o.key === source);
       return {
         source,
         label: option?.label || source,
@@ -301,7 +322,7 @@ const sourceCounts = computed(() => {
 
 // 仅展示存在站点的来源；无站点的索引器（如 Prowlarr 0）不再出现在筛选里
 const visibleSourceOptions = computed(() =>
-  sourceOptions.filter(
+  sourceOptions.value.filter(
     (o) => o.key === 'all' || (sourceCounts.value[o.key] || 0) > 0,
   ),
 );
@@ -462,7 +483,7 @@ async function handleTest(item: SiteItem) {
 const batchTestSites = computed(() =>
   filteredSites.value.filter(
     (s: any) =>
-      !(s.site_public ?? s.public) &&
+      !isPublicSite(s) &&
       (s.source || 'builtin') === 'builtin' &&
       !s.third_party,
   ),
@@ -499,9 +520,16 @@ async function handleSiteConfigUpdate(site: SiteItem, data: Partial<SiteItem>) {
   try {
     await updateIndexerSiteConfigApi({
       site_name: site.name,
+      source: site.source,
       enabled: data.enabled,
       download_setting: data.download_setting,
+      priority: data.priority,
     });
+    if (data.priority !== undefined) {
+      // 数字输入逐次触发，直接更新本地对象，避免每次点击都刷新整个列表
+      site.priority = data.priority;
+      return;
+    }
     notification.success('保存成功');
     await fetchSites();
   } catch (error: any) {

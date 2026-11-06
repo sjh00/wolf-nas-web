@@ -630,6 +630,24 @@ export const useTabbarStore = defineStore('core-tabbar', {
             }
             parsed.visitHistory = stack;
           }
+          if (Array.isArray(parsed.tabs)) {
+            // 迁移旧版按 fullPath 保存的资源搜索标签，只保留最后一个并复用 path key。
+            let keptSearch = false;
+            const tabs: any[] = [];
+            for (const tab of [...parsed.tabs].reverse()) {
+              if (
+                String(tab?.path || tab?.fullPath || '').startsWith(
+                  '/media/search',
+                )
+              ) {
+                if (keptSearch) continue;
+                keptSearch = true;
+                tab.key = '/media/search';
+              }
+              tabs.push(tab);
+            }
+            parsed.tabs = tabs.reverse();
+          }
           return parsed;
         },
       },
@@ -724,6 +742,9 @@ function getTabKey(tab: RouteLocationNormalized | RouteRecordNormalized) {
   let rawKey;
   if (pageKey) {
     rawKey = pageKey;
+  } else if (path === '/media/search') {
+    // 资源搜索复用同一个标签页，避免每次搜索按 query 堆积大量不可关闭的重复页。
+    rawKey = path;
   } else {
     rawKey = fullPathKey === false ? path : (fullPath ?? path);
   }

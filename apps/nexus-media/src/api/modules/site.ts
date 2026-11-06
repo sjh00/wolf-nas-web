@@ -6,7 +6,7 @@ import { requestClient } from '#/api/request';
 
 export namespace SiteApi {
   export interface SiteItem {
-    id: number;
+    id: number | string;
     name: string;
     display_name?: string;
     url?: string;
@@ -33,6 +33,8 @@ export namespace SiteApi {
     rule?: string;
     /** 站点来源：builtin / jackett / prowlarr */
     source?: string;
+    source_label?: string;
+    source_icon?: string;
     /** 是否为第三方索引器站点 */
     third_party?: boolean;
     /** 第三方站点是否启用 */
@@ -183,12 +185,12 @@ export async function saveSiteApi(data: Record<string, any>) {
 }
 
 /** 删除站点 */
-export async function deleteSiteApi(id: number) {
+export async function deleteSiteApi(id: number | string) {
   return requestClient.post('/site/sites/delete', { id: String(id) });
 }
 
 /** 测试站点连通性 */
-export async function testSiteApi(id: number) {
+export async function testSiteApi(id: number | string) {
   return requestClient.post(
     '/site/sites/test',
     { id: String(id) },
@@ -313,7 +315,9 @@ export async function updateIndexerSiteConfigApi(data: {
   default_settings?: Record<string, any>;
   download_setting?: number | string;
   enabled?: boolean;
+  priority?: number;
   site_name: string;
+  source?: string;
 }) {
   return requestClient.post('/site/sites/indexer-config/update', data);
 }
@@ -349,4 +353,20 @@ export async function getVisibleSitesApi() {
       health?: string;
     }[]
   >('/site/sites/visible');
+}
+
+/** 测试 HTTP 索引器配置，不写入 provider 注册表 */
+export async function testIndexerProviderApi(data: {
+  base_url: string;
+  info_path?: string;
+  timeout?: number;
+  token?: string;
+}) {
+  return requestClient.post<{
+    api_version: string;
+    capabilities: string[];
+    name: string;
+    ok: boolean;
+    sites: Array<{ id: string; name: string }>;
+  }>('/site/sites/indexer-providers/test', data, { timeout: 60_000 });
 }

@@ -9,11 +9,13 @@ import MarkdownIt from 'markdown-it';
 import { NButton, NModal, NSpin, NTooltip, useMessage } from 'naive-ui';
 
 import { readAgentDoc } from '#/api/modules/agent';
+import { getContentProfileMessageImageUrl } from '#/plugin-framework/loader';
 import { copyText } from '#/utils/clipboard';
 
 const props = defineProps<{
   attachments?: AgentApi.ChatAttachment[];
   content: string;
+  contentProfile?: string;
   image?: string;
   items?: AgentApi.ListItem[];
   reasoning?: string;
@@ -56,6 +58,15 @@ const rendered = computed(() => {
 
 const isUser = computed(() => props.role === 'user');
 const isSystem = computed(() => props.role === 'system');
+const displayImage = computed(() =>
+  getContentProfileMessageImageUrl(props.contentProfile, props.image),
+);
+const displayItems = computed(() =>
+  (props.items || []).map((item) => ({
+    ...item,
+    image: getContentProfileMessageImageUrl(props.contentProfile, item.image),
+  })),
+);
 
 // 思考过程：可折叠面板，把 tool_call/tool_result 配成步骤列表
 const thinkingOpen = ref(false);
@@ -284,7 +295,7 @@ function onContentClick(event: MouseEvent) {
             {{ content }}
           </div>
           <a
-            v-for="it in items"
+            v-for="it in displayItems"
             :key="it.index"
             :href="it.url || url || '#'"
             target="_blank"
@@ -342,13 +353,13 @@ function onContentClick(event: MouseEvent) {
           }"
         >
           <a
-            :href="url || image"
+            :href="url || displayImage"
             target="_blank"
             rel="noreferrer"
             class="block"
           >
             <img
-              :src="image"
+              :src="displayImage"
               class="h-36 w-full object-cover"
               alt="消息图片"
               @error="hideBrokenImg"
@@ -363,7 +374,7 @@ function onContentClick(event: MouseEvent) {
           </div>
         </div>
         <div
-          v-else-if="!items?.length"
+          v-else-if="!displayItems.length"
           class="agent-sys-firstline whitespace-pre-wrap rounded-xl border px-3 py-2"
           :style="{
             background: 'hsl(var(--card))',

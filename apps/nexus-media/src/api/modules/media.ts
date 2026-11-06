@@ -160,10 +160,11 @@ export async function searchMetadataApi(params: {
   limit?: number;
   provider?: string;
   query: string;
+  timeout_seconds?: number;
 }) {
   return requestClient.post<Record<string, any>[]>(
     '/media/metadata/search',
-    params,
+    { timeout_seconds: 120, ...params },
     { timeout: 150_000 },
   );
 }
@@ -189,6 +190,8 @@ export async function getMediaDetailByRefApi(
   mediaType?: string,
   contentProfile?: string,
   contentId?: string,
+  title?: string,
+  year?: string,
 ) {
   return requestClient.post<Record<string, any>>('/media/detail_by_ref', {
     provider,
@@ -196,6 +199,8 @@ export async function getMediaDetailByRefApi(
     media_type: mediaType,
     content_profile: contentProfile || undefined,
     content_id: contentId || undefined,
+    title: title || undefined,
+    year: year || undefined,
   });
 }
 

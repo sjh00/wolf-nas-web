@@ -3,7 +3,7 @@ import type { DataTableColumns } from 'naive-ui';
 
 import type { LifecycleApi } from '#/api/modules/lifecycle';
 
-import { computed, h, onMounted, ref, watch } from 'vue';
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { IconifyIcon } from '@vben/icons';
@@ -140,6 +140,13 @@ const lifecyclePhases = [
   },
   { label: '入库', icon: 'lucide:library', stages: ['in_library'] },
 ];
+function formatSourceProvider(value?: null | string) {
+  const key = String(value || '').trim();
+  if (!key) return '未知来源';
+  if (key === 'content_id') return '番号识别';
+  return key.toUpperCase();
+}
+
 const stageMap = new Map(stageOptions.map((item) => [item.value, item.label]));
 const statusMap = new Map(
   statusOptions.map((item) => [item.value, item.label]),
@@ -162,10 +169,46 @@ const activeFilterCount = computed(
     [stage.value, status.value, mediaType.value].filter(Boolean).length +
     (keyword.value.trim() ? 1 : 0),
 );
+const terminalEventStatuses = new Set([
+  'cancelled',
+  'dead',
+  'failed',
+  'succeeded',
+]);
+const activeEventStatuses = new Set([
+  'blocked',
+  'paused',
+  'queued',
+  'retrying',
+  'running',
+]);
+// 旧事件里的“进行中”只代表当时状态；后续已有终态事件时按已结束展示
+const timelineEvents = computed(() => {
+  const list = events.value || [];
+  return list.map((event, index) => {
+    if (index === list.length - 1 || !activeEventStatuses.has(event.status)) {
+      return event;
+    }
+    const terminal = list
+      .slice(index + 1)
+      .find((item) => terminalEventStatuses.has(item.status));
+    if (!terminal) return event;
+    return { ...event, status: terminal.status };
+  });
+});
+
 const latestTask = computed(() => {
-  for (let index = events.value.length - 1; index >= 0; index -= 1) {
-    const payload = events.value[index]?.payload || {};
-    if (payload.queue || payload.task_id) return payload;
+  // 只展示仍在排队/运行的任务；已完成任务不应出现在“当前队列”
+  for (let index = timelineEvents.value.length - 1; index >= 0; index -= 1) {
+    const event = timelineEvents.value[index];
+    if (!event) continue;
+    const payload = event.payload || {};
+    if (
+      (payload.queue || payload.task_id) &&
+      ['queued', 'retrying', 'running'].includes(event.status)
+    ) {
+      return payload;
+    }
   }
   return {};
 });
@@ -501,7 +544,7 @@ const columns = computed<DataTableColumns<LifecycleApi.Item>>(() => {
       width: 130,
       render: (row) =>
         h('div', { class: 'provider-cell' }, [
-          h('span', (row.source_provider || '未知来源').toUpperCase()),
+          h('span', formatSourceProvider(row.source_provider)),
           h('small', row.content_profile || 'default'),
         ]),
     },
@@ -600,9 +643,11 @@ const columns = computed<DataTableColumns<LifecycleApi.Item>>(() => {
   );
 });
 
-async function fetchData() {
-  loading.value = true;
-  loadError.value = '';
+async function fetchData(silent = false) {
+  if (!silent) {
+    loading.value = true;
+    loadError.value = '';
+  }
   try {
     const [list, statData] = await Promise.all([
       getLifecycleListApi({
@@ -619,11 +664,22 @@ async function fetchData() {
     total.value = list?.total || 0;
     stats.value = statData || { total: 0, by_status: {}, by_stage: {} };
   } catch (error: any) {
+    if (silent) return;
     loadError.value =
       error?.response?.data?.detail || '媒体生命周期加载失败，请稍后重试';
     message.error(loadError.value);
   } finally {
-    loading.value = false;
+    if (!silent) loading.value = false;
+  }
+}
+
+let pollTimer: null | ReturnType<typeof setInterval> = null;
+
+async function refreshSilently() {
+  if (document.hidden || loading.value) return;
+  await fetchData(true);
+  if (drawerVisible.value && selected.value) {
+    await refreshDetail().catch(() => {});
   }
 }
 
@@ -979,6 +1035,16 @@ onMounted(async () => {
   if (route.query.keyword) keyword.value = String(route.query.keyword);
   await fetchData();
   await openIdentityFromQuery();
+  pollTimer = setInterval(() => {
+    void refreshSilently();
+  }, 3000);
+});
+
+onUnmounted(() => {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
 });
 
 watch(
@@ -996,7 +1062,7 @@ watch(
       subtitle="集中追踪识别、下载、转移与入库状态，快速定位需要介入的任务"
     >
       <template #actions>
-        <NButton :loading="loading" @click="fetchData">
+        <NButton :loading="loading" @click="fetchData()">
           <template #icon>
             <IconifyIcon icon="lucide:refresh-cw" class="size-4" />
           </template>
@@ -1122,7 +1188,7 @@ watch(
           <strong>暂时无法加载流转记录</strong>
           <p>{{ loadError }}</p>
         </div>
-        <NButton size="small" :loading="loading" @click="fetchData">
+        <NButton size="small" :loading="loading" @click="fetchData()">
           重新加载
         </NButton>
       </div>
@@ -1205,7 +1271,7 @@ watch(
             <div class="mobile-card-foot">
               <span>
                 <IconifyIcon icon="lucide:database" class="size-3.5" />
-                {{ row.source_provider || '未知来源' }}
+                {{ formatSourceProvider(row.source_provider) }}
               </span>
               <span>
                 <IconifyIcon icon="lucide:timer" class="size-3.5" />
@@ -1320,7 +1386,9 @@ watch(
                     {{ selected.title || selected.identity_id }}
                   </h2>
                   <div class="detail-meta">
-                    <span>{{ selected.source_provider || '未知来源' }}</span>
+                    <span>{{
+                      formatSourceProvider(selected.source_provider)
+                    }}</span>
                     <span>{{ selected.content_profile || 'default' }}</span>
                   </div>
                   <div
@@ -1637,7 +1705,7 @@ watch(
                 </div>
                 <NTimeline v-else-if="events.length > 0" class="event-timeline">
                   <NTimelineItem
-                    v-for="event in events"
+                    v-for="event in timelineEvents"
                     :key="event.id"
                     :type="statusTagType(event.status)"
                     :time="formatTime(event.occurred_at)"
