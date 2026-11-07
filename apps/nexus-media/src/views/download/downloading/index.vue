@@ -352,6 +352,19 @@ function stopAutoRefresh() {
     clearInterval(refreshTimer.value);
     refreshTimer.value = null;
   }
+  for (const timer of pendingRefreshTimers) clearTimeout(timer);
+  pendingRefreshTimers.length = 0;
+}
+
+/** 添加下载后的短延迟刷新（后台推送完成后任务才落库），卸载时统一清理 */
+const pendingRefreshTimers: number[] = [];
+
+function scheduleQuickRefresh() {
+  for (const delay of [800, 1600, 3200]) {
+    pendingRefreshTimers.push(
+      window.setTimeout(() => void fetchTasks(1, true), delay),
+    );
+  }
 }
 
 async function loadDownloadDirs(sid?: string) {
@@ -409,39 +422,66 @@ async function handleAddDownload() {
             .map((u) => u.trim())
             .filter(Boolean)
         : [];
-    const files: string[] = [];
+    // 上传接口把文件存成 upload_<随机>.torrent，原始名必须一并回传给后端，
+    // 否则识别源会退化成临时文件名（下载记录显示 upload_xxxx）。
+    const files: Array<{ filename: string; original_name: string }> = [];
     if (addType.value === 'torrent') {
-      for (const item of fileList.value) {
-        const raw = item.file;
-        if (!(raw instanceof File)) continue;
-        const uploaded = (await uploadTorrentFileApi(raw)) as any;
-        const saved = uploaded?.filename || uploaded?.data?.filename;
-        if (saved) files.push(saved);
+      const picked = fileList.value.filter((item) => item.file instanceof File);
+      // 并发上传：串行上传几十个种子会让「添加」按钮长时间无响应
+      const uploadedList = await Promise.all(
+        picked.map(async (item) => {
+          const raw = item.file as File;
+          try {
+            const uploaded = (await uploadTorrentFileApi(raw)) as any;
+            const saved = uploaded?.filename || uploaded?.data?.filename;
+            if (!saved) return null;
+            return {
+              filename: saved,
+              original_name:
+                uploaded?.original_name ||
+                uploaded?.data?.original_name ||
+                raw.name,
+            };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const uploaded of uploadedList) {
+        if (uploaded) files.push(uploaded);
       }
       if (files.length === 0) {
         message.error('种子文件上传失败');
         return;
       }
+      if (files.length < picked.length) {
+        message.warning(
+          `${picked.length - files.length} 个种子上传失败，已跳过`,
+        );
+      }
     }
 
-    const totalItems = files.length + urls.length;
     const done = await multiVersionDownload.submit(
       (strategy?: string) =>
         addTorrentApi({
           confirm_strategy: strategy,
           urls,
           files,
-          // 批量添加时不能传统一标题：后端会拿它去识别每一条，
-          // 其余种子会被识别成同一部作品。交给后端按各自文件名/链接识别。
-          title: totalItems > 1 ? undefined : urls[0] || files[0],
+          // 种子文件不传标题：后端会读种子内部的发布名（info.name），比文件名更准。
+          // 多条时更不能传统一标题，否则整批会被识别成同一部作品。
+          // 仅单条链接保留标题，便于 magnet 等处按上下文识别。
+          title: urls.length === 1 && files.length === 0 ? urls[0] : undefined,
           dl_dir: selectedDir.value || undefined,
           dl_setting: selectedSetting.value || undefined,
         }),
       {
         successMessage: () => {
-          message.success('添加下载成功');
+          message.success('已提交，正在同步到下载器');
           addModalShow.value = false;
+          // 后端在后台线程推送种子、成功后才落库；立刻刷新往往查不到，
+          // 因此短时间内快速重试几次，让新任务一落库就出现。
           void fetchTasks(1);
+          scheduleQuickRefresh();
         },
       },
     );

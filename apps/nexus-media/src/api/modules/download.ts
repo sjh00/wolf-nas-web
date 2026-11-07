@@ -395,7 +395,14 @@ export async function addTorrentApi(params: {
   dl_dir?: string;
   dl_setting?: string;
   download_volume_factor?: number;
-  files?: string[];
+  /** 字符串为临时文件名（兼容旧调用）；对象额外携带原始文件名用于识别 */
+  files?: Array<
+    | string
+    | {
+        filename: string;
+        original_name?: string;
+      }
+  >;
   page_url?: string;
   site?: string;
   size?: number;
