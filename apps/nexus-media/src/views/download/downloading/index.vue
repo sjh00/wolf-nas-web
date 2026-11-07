@@ -57,7 +57,8 @@ const pageSize = ref(50);
 const selectedDownloader = ref('');
 const viewMode = ref<'grid' | 'list'>('grid');
 const addModalShow = ref(false);
-const addType = ref<'torrent' | 'url'>('url');
+// 默认打开「种子文件」页：批量添加时上传比逐个粘贴链接更常用
+const addType = ref<'torrent' | 'url'>('torrent');
 const torrentUrls = ref('');
 const fileList = ref<UploadFileInfo[]>([]);
 const downloadDirs = ref<string[]>([]);
@@ -364,7 +365,7 @@ async function loadDownloadDirs(sid?: string) {
 
 async function openAddModal() {
   addModalShow.value = true;
-  addType.value = 'url';
+  addType.value = 'torrent';
   torrentUrls.value = '';
   fileList.value = [];
   selectedDir.value = '';
@@ -423,16 +424,16 @@ async function handleAddDownload() {
       }
     }
 
+    const totalItems = files.length + urls.length;
     const done = await multiVersionDownload.submit(
       (strategy?: string) =>
         addTorrentApi({
           confirm_strategy: strategy,
           urls,
           files,
-          title:
-            addType.value === 'url'
-              ? urls[0]
-              : fileList.value[0]?.name || files[0],
+          // 批量添加时不能传统一标题：后端会拿它去识别每一条，
+          // 其余种子会被识别成同一部作品。交给后端按各自文件名/链接识别。
+          title: totalItems > 1 ? undefined : urls[0] || files[0],
           dl_dir: selectedDir.value || undefined,
           dl_setting: selectedSetting.value || undefined,
         }),
@@ -987,10 +988,19 @@ onUnmounted(() => {
         </NTabPane>
         <NTabPane name="torrent" tab="种子文件">
           <NForm label-placement="top">
-            <NFormItem label="种子文件" required>
+            <NFormItem
+              label="种子文件"
+              required
+              :feedback="
+                fileList.length > 1
+                  ? `已选择 ${fileList.length} 个种子，将分别识别并添加`
+                  : '可一次选择多个 .torrent 文件'
+              "
+            >
               <NUpload
                 v-model:file-list="fileList"
-                :max="5"
+                multiple
+                :max="20"
                 accept=".torrent"
                 :default-upload="false"
               >
