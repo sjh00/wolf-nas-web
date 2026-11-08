@@ -293,13 +293,21 @@ async function confirmDownload() {
           size: resource.size ?? undefined,
         }),
       {
+        // 弹版本确认框前先收起本弹窗，否则确认框会被它的遮罩挡住
+        beforeConfirm: () => {
+          downloadModalVisible.value = false;
+        },
         successMessage: () => {
           notification.success('下载任务已提交');
           downloadModalVisible.value = false;
         },
       },
     );
-    if (!done) return;
+    if (!done) {
+      // 取消：把弹窗放回来，已选条件仍在，可改选后重试
+      downloadModalVisible.value = true;
+      return;
+    }
   } catch {
     // 全局请求拦截器已展示错误提示
   } finally {
