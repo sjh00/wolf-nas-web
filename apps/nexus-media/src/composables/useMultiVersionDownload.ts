@@ -78,7 +78,16 @@ export function useMultiVersionDownload() {
 
   async function submit(
     submitFn: SubmitFn,
-    options?: { successMessage?: () => void },
+    options?: {
+      successMessage?: () => void;
+      /**
+       * 弹确认框之前执行。用于先关闭发起下载的弹窗（如「新增下载」）：
+       * naive-ui 的 DialogProvider 在应用启动时即分配 z-index，低于页面内
+       * 后创建的 NModal，确认框会被遮罩挡住——看不到按钮、点不了，
+       * 等待结果的 Promise 永不 resolve，表现为「点了添加没反应」。
+       */
+      beforeConfirm?: () => void;
+    },
   ): Promise<boolean> {
     try {
       loading.value = true;
@@ -89,6 +98,7 @@ export function useMultiVersionDownload() {
         return true;
       }
 
+      options?.beforeConfirm?.();
       _confirm.value = confirm;
       _submitFn.value = submitFn;
       _selected.value = new Set();

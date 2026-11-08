@@ -475,6 +475,10 @@ async function handleAddDownload() {
           dl_setting: selectedSetting.value || undefined,
         }),
       {
+        // 弹版本确认框前先收起本弹窗，否则确认框会被它的遮罩挡住
+        beforeConfirm: () => {
+          addModalShow.value = false;
+        },
         successMessage: () => {
           message.success('已提交，正在同步到下载器');
           addModalShow.value = false;
@@ -485,7 +489,12 @@ async function handleAddDownload() {
         },
       },
     );
-    if (!done) return;
+    if (!done) {
+      // 用户取消了版本选择：把弹窗放回来，已选文件与目录仍在，可改选后重试
+      addModalShow.value = true;
+      message.info('已取消，请重新选择处理方式');
+      return;
+    }
   } catch (error: any) {
     message.error(error?.message || '添加下载失败');
   } finally {
