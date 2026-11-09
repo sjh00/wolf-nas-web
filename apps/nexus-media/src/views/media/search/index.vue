@@ -33,6 +33,7 @@ import {
   getDownloadDirsApi,
   getDownloadSettingsApi,
 } from '#/api/modules/download';
+import { getMediaDetailByRefApi } from '#/api/modules/media';
 import { getVisibleSitesApi } from '#/api/modules/site';
 import {
   addSubscriptionApi,
@@ -1164,6 +1165,57 @@ function resolveSearchTarget() {
   return { activeProvider, sourceProfile };
 }
 
+/**
+ * 纯数字关键词按 TMDB 号直接检索。
+ *
+ * TMDB 的数字 ID 按类型分区：同一个数字在电影与剧集下是两部完全不同的作品
+ * （此前「谷雨」的剧集 ID 被当成电影 ID，订阅结果变成另一部老片）。
+ * 因此这里同时查两种类型，各自成为一张卡片，由用户看清标题后再选。
+ */
+async function searchByTmdbId(tmdbId: string) {
+  const types = ['tv', 'movie'] as const;
+  const results: MediaItem[] = [];
+  for (const type of types) {
+    try {
+      const res: any = await getMediaDetailByRefApi('tmdb', tmdbId, type);
+      const record: any = res?.data || res || {};
+      const title = String(
+        record.title || record.name || record.cn_name || '',
+      ).trim();
+      if (!title) continue;
+      const year = String(
+        record.year ||
+          (record.release_date || record.first_air_date || '').slice(0, 4),
+      );
+      results.push({
+        id: tmdbId,
+        tmdb_id: tmdbId,
+        title,
+        year,
+        type,
+        media_type: type,
+        metadata_ref: `tmdb:${tmdbId}`,
+        provider: 'tmdb',
+        anchor_provider: 'tmdb',
+        anchor_external_id: tmdbId,
+        image: record.poster || record.poster_path,
+        poster: record.poster || record.poster_path,
+        overview: record.overview,
+        vote: record.vote_average ?? record.vote,
+      } as MediaItem);
+    } catch {
+      // 该类型下没有此 ID：正常情况，跳过
+    }
+  }
+  mediaResults.value = results;
+  saveSearchSnapshot({ status: 'completed', mediaResults: results });
+  if (results.length === 0) {
+    notification.warning('未找到该 TMDB 号', {
+      description: `TMDB ${tmdbId} 在电影与剧集下都没有结果，请确认号码是否正确`,
+    });
+  }
+}
+
 async function handleSearch() {
   if (!keyword.value.trim()) return;
   // 取消上一个搜索的结果轮询，避免旧资源结果覆盖当前影视搜索。
@@ -1180,6 +1232,15 @@ async function handleSearch() {
     sessionId: '',
     status: 'running',
   });
+  // 纯数字 → 按 TMDB 号精确检索
+  if (/^\d+$/.test(keyword.value.trim())) {
+    try {
+      await searchByTmdbId(keyword.value.trim());
+    } finally {
+      loading.value = false;
+    }
+    return;
+  }
   try {
     const { activeProvider, sourceProfile } = resolveSearchTarget();
     // 全部来源也走统一的多元数据框架，由后端聚合所有已注册 provider。
@@ -1217,6 +1278,21 @@ function effectiveContentProfile(item: any): string {
       '',
   );
   return getContentProfileForSource(source);
+}
+
+/** 取媒体条目的 TMDB 号：优先显式字段，其次 tmdb: 锚点/引用 */
+function mediaTmdbId(media: MediaItem): string {
+  const explicit = String(media.tmdb_id ?? '').trim();
+  if (/^\d+$/.test(explicit)) return explicit;
+  for (const raw of [media.metadata_ref, media.anchor_external_id]) {
+    const text = String(raw || '').trim();
+    const ref = text.startsWith('tmdb:') ? text.slice(5) : text;
+    if (/^\d+$/.test(ref)) return ref;
+  }
+  const provider = String(media.anchor_provider || media.provider || '').trim();
+  const id = String(media.id ?? '').trim();
+  if ((!provider || provider === 'tmdb') && /^\d+$/.test(id)) return id;
+  return '';
 }
 
 function handleMediaCardClick(media: MediaItem) {
@@ -2626,6 +2702,14 @@ async function confirmDownload() {
                 >
                   {{ mediaSourceLabel(media) }}
                 </span>
+              </div>
+              <!-- TMDB 号：便于核对与手动纠正识别结果 -->
+              <div
+                v-if="mediaTmdbId(media)"
+                class="mt-0.5 font-mono text-[10px] text-white/70"
+                :title="`TMDB ${mediaTmdbId(media)}`"
+              >
+                TMDB {{ mediaTmdbId(media) }}
               </div>
               <MediaCardActions
                 v-if="isTouch"
