@@ -259,28 +259,45 @@ async function handleSubscribe(item: SearchResult, e: Event) {
 async function handleConfirmSubscribe(payload: {
   add: number[];
   autoMode: boolean;
+  override?: {
+    image?: string;
+    tmdbId: string;
+    title: string;
+    type: string;
+    year: string;
+  };
   remove: number[];
   selected: number[];
 }) {
   const it = subscribeConfirmItem.value;
   if (!it) return;
   const { add, remove, selected } = payload;
+  // 手动指定 TMDB 时以用户确认为准，其余字段回落到搜索结果自身信息
+  const ov = payload.override;
+  const effType = ov?.type || it.type;
+  const effTitle = ov?.title || it.title;
+  const effYear = ov?.year || it.year || '';
+  const effImage = ov?.image || it.image;
+  const effMediaId = ov ? `tmdb:${ov.tmdbId}` : it.mediaid || String(it.id);
+  const effMetadataRef = ov ? `tmdb:${ov.tmdbId}` : it.metadata_ref;
+  const effAnchorProvider = ov ? 'tmdb' : it.anchor_provider;
+  const effAnchorExternalId = ov ? ov.tmdbId : it.anchor_external_id;
   subscribeConfirmPending.value = true;
   try {
-    const typeParam = it.type === 'movie' ? 'movie' : 'tv';
+    const typeParam = effType === 'movie' ? 'movie' : 'tv';
     if (typeParam === 'tv') {
       let lastRssid = '';
       for (const season of add) {
         const r: any = await addSubscriptionMediaApi({
-          name: it.title,
-          year: it.year || '',
+          name: effTitle,
+          year: effYear,
           type: 'tv',
-          mediaid: it.mediaid || String(it.id),
+          mediaid: effMediaId,
           season: String(season),
           content_profile: it.content_profile,
-          metadata_ref: it.metadata_ref,
-          provider: it.provider,
-          image: it.image,
+          metadata_ref: effMetadataRef,
+          provider: ov ? 'tmdb' : it.provider,
+          image: effImage,
         });
         lastRssid = r?.rssid ? String(r.rssid) : lastRssid;
       }
@@ -302,27 +319,27 @@ async function handleConfirmSubscribe(payload: {
       if (add.length > 0) parts.push(`订阅 ${add.length} 季`);
       if (remove.length > 0) parts.push(`退订 ${remove.length} 季`);
       notification.success('操作成功', {
-        description: `${it.title} 已${parts.join('、')}`,
+        description: `${effTitle} 已${parts.join('、')}`,
       });
       updateCardSubscribeState(it.title, fav, lastRssid || undefined);
       updateMediaSubscribeState(it.id, fav, lastRssid || undefined);
     } else {
       const res: any = await addSubscriptionMediaApi({
-        name: it.title,
-        year: it.year || '',
+        name: effTitle,
+        year: effYear,
         type: typeParam,
-        mediaid: it.mediaid || String(it.id),
+        mediaid: effMediaId,
         content_profile: it.content_profile,
-        metadata_ref: it.metadata_ref,
-        provider: it.provider,
-        anchor_provider: it.anchor_provider,
-        anchor_external_id: it.anchor_external_id,
-        image: it.image,
+        metadata_ref: effMetadataRef,
+        provider: ov ? 'tmdb' : it.provider,
+        anchor_provider: effAnchorProvider,
+        anchor_external_id: effAnchorExternalId,
+        image: effImage,
       });
       const success = res?.code === 0 || res?.success || res?.rssid || !res;
       if (success) {
         notification.success('订阅成功', {
-          description: res?.msg || `${it.title} 已添加订阅`,
+          description: res?.msg || `${effTitle} 已添加订阅`,
         });
         updateCardSubscribeState(
           it.title,

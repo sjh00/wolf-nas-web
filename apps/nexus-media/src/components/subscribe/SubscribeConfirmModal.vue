@@ -7,6 +7,7 @@ import {
   NButton,
   NCard,
   NCheckbox,
+  NInput,
   NModal,
   NSelect,
   NSpace,
@@ -57,6 +58,14 @@ const emit = defineEmits<{
     payload: {
       add: number[];
       autoMode: boolean;
+      /** 手动指定的 TMDB 身份；未手动指定时为 undefined */
+      override?: {
+        image?: string;
+        tmdbId: string;
+        title: string;
+        type: string;
+        year: string;
+      };
       policy: string;
       remove: number[];
       selected: number[];
@@ -109,8 +118,9 @@ const typeLabel = computed(() => {
   if (profile && profile !== 'default') {
     return getContentProfileLabel(profile) || profile.toUpperCase();
   }
-  if (props.item.type === 'movie') return '电影';
-  if (props.item.type === 'anime') return '动漫';
+  const t = effectiveType.value;
+  if (t === 'movie') return '电影';
+  if (t === 'anime') return '动漫';
   return '剧集';
 });
 
@@ -135,6 +145,48 @@ const subscribedSeasons = ref<number[]>([]);
 // 优先展示默认订阅配置；未配置时才回退全部已授权站点
 const siteSummary = ref<{ rss: number; search: number }>({ rss: 0, search: 0 });
 const usingDefaultSites = ref(false);
+
+// ---- 手动指定 TMDB（识别错作品时由用户直接指定） ----
+const manualType = ref('tv');
+const manualTmdbId = ref('');
+const manualChecking = ref(false);
+const manualError = ref('');
+const manualResolved = ref<null | {
+  image?: string;
+  title: string;
+  year: string;
+}>(null);
+
+const manualTypeOptions = [
+  { label: '电视剧', value: 'tv' },
+  { label: '电影', value: 'movie' },
+  { label: '动漫', value: 'anime' },
+];
+
+/** 当前条目自带的 TMDB 号（仅当来源确为 TMDB 时有效） */
+const itemTmdbId = computed(() => {
+  if (!props.item) return '';
+  const provider = String(
+    props.item.anchor_provider || props.item.provider || '',
+  ).trim();
+  if (provider && provider !== 'tmdb') return '';
+  const fromRef = String(props.item.metadata_ref || '');
+  if (fromRef.startsWith('tmdb:')) return fromRef.slice('tmdb:'.length);
+  return String(props.item.tmdbid || props.item.id || '');
+});
+
+/** 用户是否改动过手动指定区 */
+const manualDirty = computed(() => {
+  if (!props.item) return false;
+  const id = manualTmdbId.value.trim();
+  if (!id) return false;
+  return id !== itemTmdbId.value || manualType.value !== props.item.type;
+});
+
+/** 生效类型：手动指定优先 */
+const effectiveType = computed(() =>
+  manualDirty.value ? manualType.value : String(props.item?.type || 'tv'),
+);
 
 async function loadSiteSummary() {
   try {
@@ -174,7 +226,76 @@ async function loadSiteSummary() {
   }
 }
 // 动漫与电视剧共用季/集模型，仅电影走单片流程
-const isTv = computed(() => props.item?.type !== 'movie');
+const isTv = computed(() => effectiveType.value !== 'movie');
+
+/** 校验手动填写的 TMDB 号：按所选类型取详情，成功才允许应用 */
+async function checkManual() {
+  const id = manualTmdbId.value.trim();
+  manualError.value = '';
+  manualResolved.value = null;
+  if (!/^\d+$/.test(id)) {
+    manualError.value = 'TMDB 号只能是数字';
+    return;
+  }
+  manualChecking.value = true;
+  try {
+    const detail: any = await getMediaDetailByRefApi(
+      'tmdb',
+      id,
+      manualType.value,
+      undefined,
+      undefined,
+      props.item?.title,
+      props.item?.year,
+    );
+    const record = detail?.data || detail || {};
+    const title = String(
+      record.title || record.name || record.cn_name || '',
+    ).trim();
+    if (!title) {
+      manualError.value = `TMDB ${id} 在该类型下没有查到作品，请确认类型是否正确`;
+      return;
+    }
+    const year = String(
+      record.year ||
+        (record.release_date || record.first_air_date || '').slice(0, 4),
+    );
+    manualResolved.value = { title, year, image: record.poster };
+  } catch (error: any) {
+    manualError.value = error?.message || '查询失败，请检查 TMDB 号与网络';
+  } finally {
+    manualChecking.value = false;
+  }
+}
+
+async function loadSeasonsForManual() {
+  const id = manualTmdbId.value.trim();
+  if (!/^\d+$/.test(id) || !isTv.value) return;
+  loading.value = true;
+  seasons.value = [];
+  try {
+    const seasonRes = await getTvSeasonListApi(id, props.item?.title);
+    const list = Array.isArray(seasonRes)
+      ? seasonRes
+      : (seasonRes as any)?.data || [];
+    seasons.value = list
+      .map((s: any) => ({
+        season_number: Number(s.num ?? s.season_number ?? 0),
+        name: s.text || s.name,
+        episode_count: s.episode_count,
+      }))
+      .filter((s: any) => s.season_number > 0)
+      .toSorted((a: any, b: any) => a.season_number - b.season_number);
+  } catch {
+    /* 季列表失败时保留现有选择，用户仍可手动勾选 */
+  } finally {
+    if (seasons.value.length === 0) {
+      seasons.value = [{ season_number: 1, name: '第一季' }];
+    }
+    selectedSeasons.value = [seasons.value[0]!.season_number];
+    loading.value = false;
+  }
+}
 
 watch(
   () => props.show,
@@ -184,6 +305,10 @@ watch(
       policy.value = (props.item as any).metadata_policy || 'auto';
       seasons.value = [];
       subscribedSeasons.value = [];
+      manualType.value = String(props.item.type || 'tv');
+      manualTmdbId.value = itemTmdbId.value;
+      manualResolved.value = null;
+      manualError.value = '';
       loadSiteSummary();
       // 只有 TMDB（或缺省来源）才用 tmdbid 拉季列表；豆瓣/Bangumi/content_id
       // 的 mediaid 不是 TMDB ID，不能拿数字 ID 去查 TMDB。
@@ -330,15 +455,30 @@ const hasChanges = computed(
 );
 
 function handleConfirm(autoMode: boolean) {
+  // 手动指定了 TMDB 号但还没校验通过时不允许提交，避免又按原错误身份落库
+  if (manualDirty.value && !manualResolved.value) {
+    manualError.value = '请先点击「校验」确认该 TMDB 号对应的作品';
+    return;
+  }
   if (isTv.value && !hasChanges.value) {
     return;
   }
+  const override = manualResolved.value
+    ? {
+        type: manualType.value,
+        tmdbId: manualTmdbId.value.trim(),
+        title: manualResolved.value.title,
+        year: manualResolved.value.year || '',
+        image: manualResolved.value.image,
+      }
+    : undefined;
   emit('confirm', {
     add: addSeasons.value,
     remove: removeSeasons.value,
     selected: [...selectedSeasons.value],
     autoMode,
     policy: policy.value,
+    override,
   });
   emit('update:show', false);
 }
@@ -403,7 +543,7 @@ function toggleSeason(num: number) {
             <span
               class="text-xs px-2 py-0.5 rounded"
               :class="
-                item.type === 'movie'
+                effectiveType === 'movie'
                   ? 'bg-lime-100 text-lime-700'
                   : 'bg-blue-100 text-blue-700'
               "
@@ -412,6 +552,62 @@ function toggleSeason(num: number) {
             </span>
           </div>
         </div>
+      </div>
+
+      <!-- 手动指定 TMDB：自动识别成别的作品时用它纠正 -->
+      <div class="border-t pt-3">
+        <div class="text-sm font-medium mb-2">
+          手动指定 TMDB
+          <span class="text-xs text-gray-400 font-normal">
+            （识别成别的作品时，填 TMDB 号并选择类型后点校验）
+          </span>
+        </div>
+        <NSpace align="center" :wrap="true">
+          <NSelect
+            v-model:value="manualType"
+            :options="manualTypeOptions"
+            size="small"
+            style="width: 110px"
+            @update:value="manualResolved = null"
+          />
+          <NInput
+            v-model:value="manualTmdbId"
+            size="small"
+            placeholder="TMDB 号，如 279155"
+            style="width: 160px"
+            @update:value="manualResolved = null"
+          />
+          <NButton size="small" :loading="manualChecking" @click="checkManual">
+            校验
+          </NButton>
+          <NButton
+            v-if="manualResolved && isTv"
+            size="small"
+            quaternary
+            :loading="loading"
+            @click="loadSeasonsForManual"
+          >
+            刷新季列表
+          </NButton>
+        </NSpace>
+        <p
+          v-if="manualError"
+          class="text-xs mt-1.5"
+          style="color: hsl(var(--destructive))"
+        >
+          {{ manualError }}
+        </p>
+        <p
+          v-else-if="manualResolved"
+          class="text-xs mt-1.5"
+          style="color: hsl(var(--success))"
+        >
+          已确认：{{ manualResolved.title
+          }}<span v-if="manualResolved.year"
+            >（{{ manualResolved.year }}）</span
+          >
+          · {{ manualTypeOptions.find((o) => o.value === manualType)?.label }}
+        </p>
       </div>
 
       <!-- TV 多季选择 -->

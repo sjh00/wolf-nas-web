@@ -272,24 +272,44 @@ async function handleSubscribe() {
 async function handleConfirmSubscribe(payload: {
   add: number[];
   autoMode: boolean;
+  override?: {
+    image?: string;
+    tmdbId: string;
+    title: string;
+    type: string;
+    year: string;
+  };
   remove: number[];
   selected: number[];
 }) {
   const { add, remove, selected } = payload;
   if (add.length === 0 && remove.length === 0) return;
+  // 手动指定 TMDB 时以用户确认为准
+  const ov = payload.override;
+  const effTitle = ov?.title || detail.value.title;
+  const effYear = ov?.year || detail.value.year || '';
+  const effMediaId = ov ? `tmdb:${ov.tmdbId}` : subscribeMediaId.value;
+  const effMetadataRef = ov
+    ? `tmdb:${ov.tmdbId}`
+    : (detail.value as any).metadata_ref;
+  const effProvider = ov ? 'tmdb' : (detail.value as any).provider;
+  const effAnchorProvider = ov ? 'tmdb' : (detail.value as any).anchor_provider;
+  const effAnchorExternalId = ov
+    ? ov.tmdbId
+    : (detail.value as any).anchor_external_id;
   try {
     for (const season of add) {
       await addSubscriptionMediaApi({
-        name: detail.value.title,
-        year: detail.value.year || '',
+        name: effTitle,
+        year: effYear,
         type: 'tv',
-        mediaid: subscribeMediaId.value,
+        mediaid: effMediaId,
         season: String(season),
         content_profile: (detail.value as any).content_profile,
-        metadata_ref: (detail.value as any).metadata_ref,
-        provider: (detail.value as any).provider,
-        anchor_provider: (detail.value as any).anchor_provider,
-        anchor_external_id: (detail.value as any).anchor_external_id,
+        metadata_ref: effMetadataRef,
+        provider: effProvider,
+        anchor_provider: effAnchorProvider,
+        anchor_external_id: effAnchorExternalId,
       });
     }
     for (const season of remove) {
