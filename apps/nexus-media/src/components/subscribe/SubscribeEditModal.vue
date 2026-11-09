@@ -10,6 +10,8 @@ import {
   NFormItem,
   NInput,
   NModal,
+  NRadioButton,
+  NRadioGroup,
   NSelect,
   NSpace,
   NTag,
@@ -20,6 +22,7 @@ import {
   getDownloadSettingsApi,
 } from '#/api/modules/download';
 import { getFilterRulesApi } from '#/api/modules/filter';
+import { getMediaDetailByRefApi } from '#/api/modules/media';
 import { getVisibleSitesApi } from '#/api/modules/site';
 import { getContentProfileLabel } from '#/plugin-framework/loader';
 import {
@@ -124,6 +127,79 @@ const form = ref({
 
 // 动漫与电视剧共用季/集相关表单项
 const isTv = computed(() => form.value.type !== 'movie');
+
+// ---- TMDB 号校验：TMDB ID 按类型分区，填号后必须按当前类型核对作品 ----
+const tmdbInput = ref('');
+const tmdbChecking = ref(false);
+const tmdbError = ref('');
+const tmdbResolved = ref<null | { title: string; year: string }>(null);
+
+/** 从表单现有字段里取出 TMDB 号 */
+function currentTmdbId(): string {
+  const tmdbid = String(form.value.tmdbid || '').trim();
+  if (/^\d+$/.test(tmdbid)) return tmdbid;
+  for (const raw of [form.value.metadata_ref, form.value.mediaid]) {
+    const text = String(raw || '').trim();
+    const ref = text.startsWith('tmdb:') ? text.slice(5) : '';
+    if (/^\d+$/.test(ref)) return ref;
+  }
+  return '';
+}
+
+/** 按当前媒体类型校验 TMDB 号，并把作品信息写回表单 */
+async function applyTmdbId() {
+  const id = tmdbInput.value.trim();
+  tmdbError.value = '';
+  tmdbResolved.value = null;
+  if (!/^\d+$/.test(id)) {
+    tmdbError.value = 'TMDB 号只能是数字';
+    return;
+  }
+  tmdbChecking.value = true;
+  try {
+    const res: any = await getMediaDetailByRefApi(
+      'tmdb',
+      id,
+      form.value.type,
+      form.value.content_profile || undefined,
+      undefined,
+      form.value.name,
+      form.value.year,
+    );
+    const record: any = res?.data || res || {};
+    const title = String(
+      record.title || record.name || record.cn_name || '',
+    ).trim();
+    if (!title) {
+      tmdbError.value = `TMDB ${id} 在「${
+        form.value.type === 'movie'
+          ? '电影'
+          : form.value.type === 'anime'
+            ? '动漫'
+            : '电视剧'
+      }」下查不到作品，请确认类型或号码`;
+      return;
+    }
+    const year = String(
+      record.year ||
+        (record.release_date || record.first_air_date || '').slice(0, 4),
+    );
+    form.value.name = title;
+    if (year) form.value.year = year;
+    form.value.tmdbid = id;
+    form.value.mediaid = `tmdb:${id}`;
+    form.value.metadata_ref = `tmdb:${id}`;
+    form.value.provider = 'tmdb';
+    form.value.anchor_provider = 'tmdb';
+    form.value.anchor_external_id = id;
+    if (record.poster) form.value.image = record.poster;
+    tmdbResolved.value = { title, year };
+  } catch (error: any) {
+    tmdbError.value = error?.message || '查询失败，请检查网络或 TMDB 号';
+  } finally {
+    tmdbChecking.value = false;
+  }
+}
 const allEpisodesDownloaded = computed(() => {
   const total = Number(form.value.total_ep) || 0;
   const current = Number(form.value.current_ep) || 0;
@@ -216,6 +292,9 @@ watch([() => props.show, () => props.item], async ([visible, item]) => {
           )
         : [],
     };
+    tmdbInput.value = currentTmdbId();
+    tmdbResolved.value = null;
+    tmdbError.value = '';
     if (item.download_setting != null) {
       await fetchDownloadDirs();
     }
@@ -412,6 +491,44 @@ function handleConfirm() {
                 <NRadioButton value="tv">电视剧</NRadioButton>
                 <NRadioButton value="anime">动漫</NRadioButton>
               </NRadioGroup>
+            </NFormItem>
+            <!-- TMDB 号：识别成别的作品时用它纠正。TMDB ID 按类型分区，
+                 同一数字在电影与剧集下可能是两部不同作品，因此必须按所选类型校验 -->
+            <NFormItem label="TMDB 号">
+              <div class="w-full">
+                <NSpace align="center" :wrap="false">
+                  <NInput
+                    v-model:value="tmdbInput"
+                    placeholder="填 TMDB 号后点校验"
+                    style="width: 180px"
+                    @update:value="tmdbResolved = null"
+                  />
+                  <NButton
+                    size="small"
+                    :loading="tmdbChecking"
+                    @click="applyTmdbId"
+                  >
+                    校验并应用
+                  </NButton>
+                  <span
+                    v-if="tmdbResolved"
+                    class="text-xs"
+                    style="color: hsl(var(--success))"
+                  >
+                    已应用：{{ tmdbResolved.title
+                    }}<span v-if="tmdbResolved.year">
+                      （{{ tmdbResolved.year }}）</span
+                    >
+                  </span>
+                </NSpace>
+                <p
+                  v-if="tmdbError"
+                  class="text-xs mt-1"
+                  style="color: hsl(var(--destructive))"
+                >
+                  {{ tmdbError }}
+                </p>
+              </div>
             </NFormItem>
             <div v-if="isTv" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <NFormItem label="季">
