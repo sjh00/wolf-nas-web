@@ -491,6 +491,15 @@ function handleConfirm() {
                 <NRadioButton value="tv">电视剧</NRadioButton>
                 <NRadioButton value="anime">动漫</NRadioButton>
               </NRadioGroup>
+              <!-- 电影与剧集分属不同数据表，已有订阅改类型需重建。
+                   明确告知，避免用户以为改不了是出了故障 -->
+              <span
+                v-if="isEdit"
+                class="ml-2 text-xs"
+                style="color: hsl(var(--muted-foreground))"
+              >
+                已有订阅不可改类型，如识别有误请删除后重新添加
+              </span>
             </NFormItem>
             <!-- TMDB 号：识别成别的作品时用它纠正。TMDB ID 按类型分区，
                  同一数字在电影与剧集下可能是两部不同作品，因此必须按所选类型校验 -->

@@ -779,7 +779,8 @@ async function selectAddMedia(media: any) {
     editItem.value = {
       name: media.title || media.name || code,
       year: String(media.year || ''),
-      type: 'movie',
+      // 类型不能硬编码：插件画像也有剧集，跟随页面类型更符合预期
+      type: props.mediaType,
       tmdbid: '',
       anchor_provider: provider,
       anchor_external_id: externalId,
@@ -818,19 +819,25 @@ async function selectAddMedia(media: any) {
     return;
   }
 
-  // 类型以结果自身为准：页面类型只是「进入哪个页签」，不能覆盖真实类型，
-  // 否则在电影页签选中一部剧集，会被强行建成电影（同名电影是另一部作品）。
+  // 类型以「进入的页面」为准：电视剧订阅页新增的就是电视剧订阅。
+  // 早前让搜索结果类型优先，而 TMDB 里同名电影与剧集并存（搜「谷雨」常先命中电影），
+  // 于在电视剧页新增却默认成电影，订阅落到另一部作品上。
+  // 动漫沿用内容画像；结果类型仅在页面类型缺失时兜底。
   const resultType = searchResultType(media);
+  const pageType: 'movie' | 'tv' = props.mediaType;
   const type: 'anime' | 'movie' | 'tv' =
     resultType === 'anime' || activeProfile.value === 'anime'
       ? 'anime'
-      : resultType === 'movie'
-        ? 'movie'
-        : resultType === 'tv'
-          ? 'tv'
-          : props.mediaType === 'movie'
-            ? 'movie'
-            : 'tv';
+      : pageType;
+  if (resultType && resultType !== 'anime' && resultType !== pageType) {
+    notification.warning('类型与当前页签不一致', {
+      description: `该条目在元数据里是${
+        resultType === 'movie' ? '电影' : '剧集'
+      }，仍按当前页签${
+        pageType === 'movie' ? '电影' : '电视剧'
+      }创建订阅；如不符合预期，请到对应页签添加`,
+    });
+  }
   const refParts = String(media.metadata_ref || '').split(':');
   const mediaProvider = String(
     media.anchor_provider ||
