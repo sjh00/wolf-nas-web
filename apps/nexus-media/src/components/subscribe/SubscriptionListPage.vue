@@ -41,6 +41,14 @@ import {
 import EmptyState from '#/components/empty/EmptyState.vue';
 import MediaPoster from '#/components/media/MediaPoster.vue';
 import PageHeader from '#/components/page/PageHeader.vue';
+import {
+  mergeSearchResults,
+  resultIdChips,
+  resultTitle,
+  resultType,
+  resultTypeLabel,
+  resultYear,
+} from '#/components/subscribe/searchResultMerge';
 import SubscribeDefaultSettingModal from '#/components/subscribe/SubscribeDefaultSettingModal.vue';
 import SubscribeEditModal from '#/components/subscribe/SubscribeEditModal.vue';
 import SubscriptionDeleteModal from '#/components/subscribe/SubscriptionDeleteModal.vue';
@@ -697,6 +705,20 @@ async function searchByTmdbId(tmdbId: string) {
   return results;
 }
 
+/** 当前页签只要本类型的条目：同名的电影与剧集不能混在一起 */
+function keepForCurrentTab(media: any): boolean {
+  const type = String(media.type || media.media_type || '').toUpperCase();
+  if (activeProfile.value === 'anime' || props.mediaType !== 'movie') {
+    return type !== 'MOVIE';
+  }
+  return !type || type === 'MOVIE';
+}
+
+/** 合并同一作品的多来源结果（实现见 searchResultMerge，便于单测） */
+function mergeAddResults(list: any[]): any[] {
+  return mergeSearchResults(list, addProvider.value);
+}
+
 async function handleAddSearch() {
   const keyword = addKeyword.value.trim();
   if (!keyword) return;
@@ -704,7 +726,7 @@ async function handleAddSearch() {
   try {
     // 纯数字按 TMDB 号精确检索（两种类型都查）
     if (/^\d+$/.test(keyword)) {
-      addResults.value = await searchByTmdbId(keyword);
+      addResults.value = mergeAddResults(await searchByTmdbId(keyword));
       if (addResults.value.length === 0) {
         notification.warning('未找到该 TMDB 号', {
           description: `TMDB ${keyword} 在电影与剧集下都没有结果，请确认号码是否正确`,
@@ -712,6 +734,7 @@ async function handleAddSearch() {
       }
       return;
     }
+    let list: any[] = [];
     if (customActive.value) {
       const res: any = await searchMetadataApi({
         content_profile: effectiveProfile.value,
@@ -719,30 +742,15 @@ async function handleAddSearch() {
         query: keyword,
         limit: 20,
       });
-      addResults.value = Array.isArray(res) ? res : res?.data || [];
+      list = Array.isArray(res) ? res : res?.data || [];
     } else {
       const res: any = await searchMediaApi({
         keyword,
         searchtype: 'tmdb',
       });
-      const raw = Array.isArray(res) ? res : res?.data || [];
-      const seen = new Set<string>();
-      addResults.value = raw.filter((media: any) => {
-        const type = String(media.type || media.media_type || '').toUpperCase();
-        const keep =
-          activeProfile.value === 'anime'
-            ? type !== 'MOVIE'
-            : props.mediaType === 'movie'
-              ? !type || type === 'MOVIE'
-              : type !== 'MOVIE';
-        if (!keep) return false;
-        // 同一 tmdb 号 + 同一类型只保留一条，避免同名重复项
-        const key = `${media.tmdb_id || media.id || media.title}-${type}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      list = Array.isArray(res) ? res : res?.data || [];
     }
+    addResults.value = mergeAddResults(list.filter(keepForCurrentTab));
   } catch (error: any) {
     notification.error('搜索失败', { description: error?.message || '' });
   } finally {
@@ -912,37 +920,24 @@ async function handleSaveSetting(data: Record<string, any>) {
 }
 
 function searchTitle(media: any): string {
-  return media.title || media.name || media.content_id || '未命名';
+  return resultTitle(media);
 }
 
 function searchYear(media: any): string {
-  return String(media.year || '');
+  return resultYear(media);
 }
 
-/** 结果自带的媒体类型（movie/tv/anime），空串表示来源未提供 */
 function searchResultType(media: any): string {
-  const raw = String(media.media_type || media.type || '').toLowerCase();
-  if (raw === 'movie' || raw === '电影') return 'movie';
-  if (raw === 'anime' || raw === '动漫') return 'anime';
-  if (raw === 'tv' || raw === '电视剧' || raw === '剧集') return 'tv';
-  return '';
+  return resultType(media);
 }
 
 function searchResultTypeLabel(media: any): string {
-  const type = searchResultType(media);
-  if (type === 'movie') return '电影';
-  if (type === 'anime') return '动漫';
-  if (type === 'tv') return '剧集';
-  return '';
+  return resultTypeLabel(media);
 }
 
-/** 结果的 TMDB 号：便于核对识别是否正确 */
-function searchResultTmdbId(media: any): string {
-  for (const value of [media.tmdb_id, media.id, media.tmdbid]) {
-    const text = String(value ?? '').trim();
-    if (/^\d+$/.test(text)) return text;
-  }
-  return '';
+/** 核对识别结果用的编号（TMDB 优先，同一作品多来源时并列） */
+function searchResultIdChips(media: any): string[] {
+  return resultIdChips(media);
 }
 
 function searchImage(media: any): string {
@@ -1098,9 +1093,13 @@ onUnmounted(() => {
                 </div>
                 <div class="text-xs text-muted-foreground">
                   <span v-if="searchYear(media)">{{ searchYear(media) }}</span>
-                  <!-- TMDB 号：核对识别结果，也便于手动指定 -->
-                  <span v-if="searchResultTmdbId(media)" class="ml-2 font-mono">
-                    TMDB {{ searchResultTmdbId(media) }}
+                  <!-- 编号：核对识别结果，也便于手动指定（同一作品多来源时并列展示） -->
+                  <span
+                    v-for="chip in searchResultIdChips(media)"
+                    :key="chip"
+                    class="ml-2 font-mono text-[11px]"
+                  >
+                    {{ chip }}
                   </span>
                 </div>
               </div>
