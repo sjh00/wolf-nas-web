@@ -21,6 +21,7 @@ import {
 import { getDownloadSettingsApi } from '#/api/modules/download';
 import { getFilterRulesApi } from '#/api/modules/filter';
 import {
+  getMediaDetailByRefApi,
   lookupMetadataApi,
   searchMediaApi,
   searchMetadataApi,
@@ -652,11 +653,65 @@ function metadataRefOf(hit: any): {
   return { provider, externalId, code };
 }
 
+/**
+ * 按 TMDB 号直接检索。
+ *
+ * TMDB 的数字 ID 按类型分区：同一个数字在电影与剧集下是两部完全不同的作品。
+ * 只查页面所属类型会让人误以为「就是这个号」，因此两种类型都查、都列出来，
+ * 由用户看清类型标签与标题后选择。
+ */
+async function searchByTmdbId(tmdbId: string) {
+  const types: string[] = ['tv', 'movie'];
+  const results: any[] = [];
+  for (const type of types) {
+    try {
+      const res: any = await getMediaDetailByRefApi('tmdb', tmdbId, type);
+      const record: any = res?.data || res || {};
+      const title = String(
+        record.title || record.name || record.cn_name || '',
+      ).trim();
+      if (!title) continue;
+      results.push({
+        id: tmdbId,
+        tmdb_id: tmdbId,
+        title,
+        year: String(
+          record.year ||
+            (record.release_date || record.first_air_date || '').slice(0, 4),
+        ),
+        type,
+        media_type: type,
+        poster: record.poster || record.poster_path,
+        image: record.poster || record.poster_path,
+        overview: record.overview,
+        vote: record.vote_average ?? record.vote,
+        metadata_ref: `tmdb:${tmdbId}`,
+        provider: 'tmdb',
+        anchor_provider: 'tmdb',
+        anchor_external_id: tmdbId,
+      });
+    } catch {
+      // 该类型下没有此号：正常情况，跳过
+    }
+  }
+  return results;
+}
+
 async function handleAddSearch() {
   const keyword = addKeyword.value.trim();
   if (!keyword) return;
   addLoading.value = true;
   try {
+    // 纯数字按 TMDB 号精确检索（两种类型都查）
+    if (/^\d+$/.test(keyword)) {
+      addResults.value = await searchByTmdbId(keyword);
+      if (addResults.value.length === 0) {
+        notification.warning('未找到该 TMDB 号', {
+          description: `TMDB ${keyword} 在电影与剧集下都没有结果，请确认号码是否正确`,
+        });
+      }
+      return;
+    }
     if (customActive.value) {
       const res: any = await searchMetadataApi({
         content_profile: effectiveProfile.value,
@@ -671,12 +726,21 @@ async function handleAddSearch() {
         searchtype: 'tmdb',
       });
       const raw = Array.isArray(res) ? res : res?.data || [];
+      const seen = new Set<string>();
       addResults.value = raw.filter((media: any) => {
         const type = String(media.type || media.media_type || '').toUpperCase();
-        if (activeProfile.value === 'anime') return type !== 'MOVIE';
-        return props.mediaType === 'movie'
-          ? !type || type === 'MOVIE'
-          : type !== 'MOVIE';
+        const keep =
+          activeProfile.value === 'anime'
+            ? type !== 'MOVIE'
+            : props.mediaType === 'movie'
+              ? !type || type === 'MOVIE'
+              : type !== 'MOVIE';
+        if (!keep) return false;
+        // 同一 tmdb 号 + 同一类型只保留一条，避免同名重复项
+        const key = `${media.tmdb_id || media.id || media.title}-${type}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
     }
   } catch (error: any) {
@@ -754,13 +818,19 @@ async function selectAddMedia(media: any) {
     return;
   }
 
-  const rawType = String(media.media_type || media.type || '').toLowerCase();
+  // 类型以结果自身为准：页面类型只是「进入哪个页签」，不能覆盖真实类型，
+  // 否则在电影页签选中一部剧集，会被强行建成电影（同名电影是另一部作品）。
+  const resultType = searchResultType(media);
   const type: 'anime' | 'movie' | 'tv' =
-    activeProfile.value === 'anime' || rawType === 'anime'
+    resultType === 'anime' || activeProfile.value === 'anime'
       ? 'anime'
-      : rawType === 'movie' || props.mediaType === 'movie'
+      : resultType === 'movie'
         ? 'movie'
-        : 'tv';
+        : resultType === 'tv'
+          ? 'tv'
+          : props.mediaType === 'movie'
+            ? 'movie'
+            : 'tv';
   const refParts = String(media.metadata_ref || '').split(':');
   const mediaProvider = String(
     media.anchor_provider ||
@@ -839,6 +909,32 @@ function searchTitle(media: any): string {
 
 function searchYear(media: any): string {
   return String(media.year || '');
+}
+
+/** 结果自带的媒体类型（movie/tv/anime），空串表示来源未提供 */
+function searchResultType(media: any): string {
+  const raw = String(media.media_type || media.type || '').toLowerCase();
+  if (raw === 'movie' || raw === '电影') return 'movie';
+  if (raw === 'anime' || raw === '动漫') return 'anime';
+  if (raw === 'tv' || raw === '电视剧' || raw === '剧集') return 'tv';
+  return '';
+}
+
+function searchResultTypeLabel(media: any): string {
+  const type = searchResultType(media);
+  if (type === 'movie') return '电影';
+  if (type === 'anime') return '动漫';
+  if (type === 'tv') return '剧集';
+  return '';
+}
+
+/** 结果的 TMDB 号：便于核对识别是否正确 */
+function searchResultTmdbId(media: any): string {
+  for (const value of [media.tmdb_id, media.id, media.tmdbid]) {
+    const text = String(value ?? '').trim();
+    if (/^\d+$/.test(text)) return text;
+  }
+  return '';
 }
 
 function searchImage(media: any): string {
@@ -975,11 +1071,29 @@ onUnmounted(() => {
                 alt=""
               />
               <div class="min-w-0 flex-1">
-                <div class="truncate font-medium">
-                  {{ searchTitle(media) }}
+                <div class="flex items-center gap-2">
+                  <span class="truncate font-medium">
+                    {{ searchTitle(media) }}
+                  </span>
+                  <!-- 类型标签：同名作品常同时存在电影与剧集，必须能区分 -->
+                  <span
+                    v-if="searchResultTypeLabel(media)"
+                    class="shrink-0 rounded px-1 py-0.5 text-[10px] leading-none"
+                    :class="
+                      searchResultType(media) === 'movie'
+                        ? 'bg-lime-100 text-lime-700'
+                        : 'bg-blue-100 text-blue-700'
+                    "
+                  >
+                    {{ searchResultTypeLabel(media) }}
+                  </span>
                 </div>
                 <div class="text-xs text-muted-foreground">
-                  {{ searchYear(media) }}
+                  <span v-if="searchYear(media)">{{ searchYear(media) }}</span>
+                  <!-- TMDB 号：核对识别结果，也便于手动指定 -->
+                  <span v-if="searchResultTmdbId(media)" class="ml-2 font-mono">
+                    TMDB {{ searchResultTmdbId(media) }}
+                  </span>
                 </div>
               </div>
             </button>
