@@ -779,8 +779,9 @@ async function selectAddMedia(media: any) {
     editItem.value = {
       name: media.title || media.name || code,
       year: String(media.year || ''),
-      // 类型不能硬编码：插件画像也有剧集，跟随页面类型更符合预期
-      type: props.mediaType,
+      // 类型不能硬编码：插件画像同样有剧集/动漫之分。
+      // 动漫画像优先，其余跟随当前页签。
+      type: activeProfile.value === 'anime' ? 'anime' : props.mediaType,
       tmdbid: '',
       anchor_provider: provider,
       anchor_external_id: externalId,
