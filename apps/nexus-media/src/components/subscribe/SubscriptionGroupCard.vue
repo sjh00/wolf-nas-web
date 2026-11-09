@@ -84,6 +84,26 @@ const voteText = computed(() => {
   return n > 0 ? n.toFixed(1) : '';
 });
 
+/** 该组订阅的 TMDB 号：优先条目字段，其次 tmdb 锚点/引用 */
+const tmdbId = computed(() => {
+  for (const item of props.items) {
+    for (const value of [item.tmdbid, item.tmdb_id]) {
+      const text = String(value ?? '').trim();
+      if (/^\d+$/.test(text)) return text;
+    }
+    if (String(item.anchor_provider || '') === 'tmdb') {
+      const text = String(item.anchor_external_id ?? '').trim();
+      if (/^\d+$/.test(text)) return text;
+    }
+    const ref = String(item.metadata_ref || '');
+    if (ref.startsWith('tmdb:')) {
+      const text = ref.slice(5).trim();
+      if (/^\d+$/.test(text)) return text;
+    }
+  }
+  return '';
+});
+
 const captionTitle = computed(() => {
   let text = props.name || '';
   if (props.type !== 'movie' && seasonLabel.value)
@@ -328,6 +348,13 @@ onMounted(ensureOutsideListener);
           <template v-if="seasonLabel">
             <span class="sgc-dot-sep">·</span>
             <span>{{ seasonLabel }}</span>
+          </template>
+          <!-- TMDB 号：核对订阅指向的作品是否正确（同名作品极易订错） -->
+          <template v-if="tmdbId">
+            <span class="sgc-dot-sep">·</span>
+            <span class="font-mono" :title="`TMDB ${tmdbId}`">
+              TMDB {{ tmdbId }}
+            </span>
           </template>
         </div>
 
