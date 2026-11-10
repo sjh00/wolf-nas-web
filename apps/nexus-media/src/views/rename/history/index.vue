@@ -40,6 +40,35 @@ interface DeleteDialogState {
   title: string;
 }
 
+/**
+ * 移除记录时可一并处理的关联资源。
+ * 「作品整体迁移」「删掉零散集重下整合版」都要求记录、文件、种子一次清干净，
+ * 否则要么下载器里留着死种，要么库里留下没有记录的孤儿文件。
+ */
+type RecordCleanupTarget = 'library' | 'source' | 'torrent';
+
+const RECORD_CLEANUP_OPTIONS: Array<{
+  description: string;
+  label: string;
+  value: RecordCleanupTarget;
+}> = [
+  {
+    value: 'torrent',
+    label: '同时移除种子任务',
+    description: '删除下载器中对应的任务（保留文件，文件由下面两项决定）',
+  },
+  {
+    value: 'source',
+    label: '同时移除源文件',
+    description: '删除下载目录里的原始文件',
+  },
+  {
+    value: 'library',
+    label: '同时移除媒体库文件',
+    description: '删除已入库的媒体库文件',
+  },
+];
+
 const mediaStore = useMediaStore();
 const notification = useAppNotification();
 
@@ -58,6 +87,8 @@ const selectedIds = ref<number[]>([]);
 const manualShow = ref(false);
 const manualItem = ref<HistoryItem | null>(null);
 const deleteDialog = ref<DeleteDialogState | null>(null);
+// 移除记录时额外清理的资源（仅在 kind === 'record' 时生效）
+const recordCleanupTargets = ref<RecordCleanupTarget[]>([]);
 // 作品级跨盘迁移
 const migrateShow = ref(false);
 const migrateTmdbId = ref<number | undefined>(undefined);
@@ -107,13 +138,24 @@ const deleteDescription = computed(() => {
   const state = deleteDialog.value;
   if (!state) return '';
   if (state.kind === 'record') {
-    return '将移除选中的识别记录，并同步移除对应黑名单。此操作不会删除任何源文件或媒体库文件，且不可恢复。';
+    if (recordCleanupTargets.value.length === 0) {
+      return '将移除选中的识别记录，并同步移除对应黑名单。此操作不会删除任何源文件或媒体库文件，且不可恢复。';
+    }
+    const labels = RECORD_CLEANUP_OPTIONS.filter((option) =>
+      recordCleanupTargets.value.includes(option.value),
+    ).map((option) => option.label.replace('同时移除', ''));
+    return `将移除选中的识别记录，并同时移除${labels.join('、')}。此操作不可恢复。`;
   }
   if (state.kind === 'clear') {
     return '将清空所有识别记录与对应黑名单。此操作不会删除任何源文件或媒体库文件，且不可恢复。';
   }
   return '文件将被永久删除，识别记录会保留并标记该文件已删除。此操作不可恢复。';
 });
+
+/** 打开「移除记录」弹窗时重置勾选，避免上一次的选择残留 */
+function resetRecordCleanup() {
+  recordCleanupTargets.value = [];
+}
 
 async function fetchData(page = 1, keepSelection = false) {
   loading.value = true;
@@ -231,6 +273,7 @@ async function handleMigrateSuccess() {
 }
 
 function openDeleteRecord(item: HistoryItem) {
+  resetRecordCleanup();
   deleteDialog.value = {
     kind: 'record',
     ids: [item.ID],
@@ -246,6 +289,7 @@ function openBulkDeleteRecords() {
     notification.warning('请先选择记录');
     return;
   }
+  resetRecordCleanup();
   deleteDialog.value = {
     kind: 'record',
     ids: [...selectedIds.value],
@@ -286,9 +330,22 @@ async function confirmDelete() {
   actionBusy.value = true;
   try {
     if (state.kind === 'record') {
-      const result = await deleteHistoryRecordsApi(state.ids);
+      const result = await deleteHistoryRecordsApi(state.ids, [
+        ...recordCleanupTargets.value,
+      ]);
       const deleted = result?.deleted ?? state.ids.length;
-      notification.success(`已移除 ${deleted} 条识别记录`);
+      const failedFiles = (result?.results || []).filter(
+        (item: any) => item.file_error,
+      );
+      if (failedFiles.length > 0) {
+        notification.warning(`已移除 ${deleted} 条记录，部分文件删除失败`, {
+          description: failedFiles
+            .map((item: any) => item.file_error)
+            .join('；'),
+        });
+      } else {
+        notification.success(`已移除 ${deleted} 条识别记录`);
+      }
       selectedIds.value = selectedIds.value.filter(
         (id) => !state.ids.includes(id),
       );
@@ -514,8 +571,10 @@ onMounted(async () => {
       :title="deleteDialog?.title || ''"
       :description="deleteDialog?.description || deleteDescription"
       :paths="deleteDialog?.kind === 'files' ? deletePaths : []"
+      :options="deleteDialog?.kind === 'record' ? RECORD_CLEANUP_OPTIONS : []"
       :confirm-text="deleteDialog?.confirmText || '确认'"
       :loading="actionBusy"
+      v-model:selected-options="recordCleanupTargets"
       @update:show="(value) => !value && (deleteDialog = null)"
       @confirm="confirmDelete"
     />
