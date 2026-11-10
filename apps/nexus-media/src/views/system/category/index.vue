@@ -278,7 +278,7 @@ async function fetch() {
     layouts.value = {
       movie: libraryConfig.movie_layout || 'category',
       tv: libraryConfig.tv_layout || 'category',
-      anime: libraryConfig.anime_layout || 'flat',
+      anime: libraryConfig.anime_layout || 'category',
     };
     tabs.value = (tabPayload || []).map((tab: any) => ({
       key: tab.key,

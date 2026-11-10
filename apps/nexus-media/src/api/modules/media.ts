@@ -577,13 +577,25 @@ export async function getTransferStatisticsApi(days?: number) {
   );
 }
 
-/** 删除识别记录（不删除任何文件） */
-export async function deleteHistoryRecordsApi(ids: number[]) {
+/**
+ * 移除识别记录。
+ *
+ * targets 非空时一并清理关联资源（源文件 / 媒体库文件 / 下载器任务），
+ * 后端按「种子 → 文件 → 记录」的顺序执行；为空则只移除记录。
+ */
+export async function deleteHistoryRecordsApi(
+  ids: number[],
+  targets: Array<'library' | 'source' | 'torrent'> = [],
+) {
   return requestClient.post<{
     deleted: number;
     results: HistoryActionResult[];
+    torrents?: {
+      deleted: Array<{ downloader: string; ids: string[] }>;
+      failed: Array<{ downloader: string; ids: string[]; message: string }>;
+    };
     total: number;
-  }>('/media/history/records/delete', { ids });
+  }>('/media/history/records/delete', { ids, targets });
 }
 
 /** 删除识别记录关联文件（记录保留） */
