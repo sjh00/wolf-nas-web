@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -18,6 +18,7 @@ import { getDownloadSettingsApi } from '#/api/modules/download';
 import { getFilterRulesApi } from '#/api/modules/filter';
 import { getVisibleSitesApi } from '#/api/modules/site';
 import { getDefaultSubscriptionSettingApi } from '#/api/modules/subscription';
+import { sitesPayloadWithFallback } from '#/components/subscribe/siteSelection';
 import {
   joinMultiSelect,
   pixOptions,
@@ -57,6 +58,14 @@ const form = ref({
   rss_sites: [] as string[],
   search_sites: [] as string[],
 });
+
+// 站点是否被改动过：未改动就回传已读到的原值（含 null=未设置），
+// 否则「没勾选」会被当成「零站点」写进默认设置，反过来影响所有新订阅。
+const sitesTouched = reactive({ rss: false, search: false });
+const loadedSites = reactive<{
+  rss: null | string[];
+  search: null | string[];
+}>({ rss: null, search: null });
 
 const title = computed(() => {
   if (props.titleOverride) return props.titleOverride;
@@ -126,6 +135,13 @@ async function loadSettings() {
       props.contentProfile,
     );
     const data = res?.data || res || {};
+    // 原值可能是 null（未设置）、[]（明确不选）或列表，都要原样记住
+    loadedSites.rss = Array.isArray(data.rss_sites)
+      ? [...data.rss_sites]
+      : null;
+    loadedSites.search = Array.isArray(data.search_sites)
+      ? [...data.search_sites]
+      : null;
     form.value = {
       over_edition:
         data.over_edition && String(data.over_edition) === '1' ? '1' : '0',
@@ -147,6 +163,8 @@ async function loadSettings() {
         : []
       ).filter((s: string) => searchSites.value.some((x) => x.value === s)),
     };
+    sitesTouched.rss = false;
+    sitesTouched.search = false;
   } catch {
     // ignore
   }
@@ -165,8 +183,10 @@ function toggleAllSites(type: 'rss' | 'search', checked: boolean) {
       : searchSites.value.map((s) => s.value);
   if (type === 'rss') {
     form.value.rss_sites = checked ? [...all] : [];
+    sitesTouched.rss = true;
   } else {
     form.value.search_sites = checked ? [...all] : [];
+    sitesTouched.search = true;
   }
 }
 
@@ -176,6 +196,7 @@ function updateSite(type: 'rss' | 'search', value: string, checked: boolean) {
   if (checked) set.add(value);
   else set.delete(value);
   form.value[key] = [...set];
+  sitesTouched[type] = true;
 }
 
 function toggleSite(type: 'rss' | 'search', value: string) {
@@ -184,6 +205,7 @@ function toggleSite(type: 'rss' | 'search', value: string) {
   if (set.has(value)) set.delete(value);
   else set.add(value);
   form.value[key] = [...set];
+  sitesTouched[type] = true;
 }
 
 function handleConfirm() {
@@ -197,8 +219,19 @@ function handleConfirm() {
     exclude: form.value.exclude,
     free: form.value.free,
     download_setting: form.value.download_setting,
-    rss_sites: form.value.rss_sites,
-    search_sites: form.value.search_sites,
+    // 未改动 → 回传原值（可能是 null=未设置），改动过才用当前勾选（含空列表）
+    ...sitesPayloadWithFallback(
+      'rss_sites',
+      sitesTouched.rss,
+      form.value.rss_sites,
+      loadedSites.rss,
+    ),
+    ...sitesPayloadWithFallback(
+      'search_sites',
+      sitesTouched.search,
+      form.value.search_sites,
+      loadedSites.search,
+    ),
     ...(props.contentProfile ? { content_profile: props.contentProfile } : {}),
   });
   emit('update:show', false);

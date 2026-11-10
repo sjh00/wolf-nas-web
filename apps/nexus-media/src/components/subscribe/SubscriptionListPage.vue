@@ -898,10 +898,12 @@ async function selectAddMedia(media: any) {
     save_path: defaults.save_path || '',
     total_ep: '',
     current_ep: '',
-    rss_sites: Array.isArray(defaults.rss_sites) ? defaults.rss_sites : [],
+    // 原样透传默认设置里的站点：null=未设置（交给后端沿用默认/全部），
+    // 空数组=默认设置里明确不选，两者不能混成同一件事
+    rss_sites: Array.isArray(defaults.rss_sites) ? defaults.rss_sites : null,
     search_sites: Array.isArray(defaults.search_sites)
       ? defaults.search_sites
-      : [],
+      : null,
   };
   editShow.value = true;
 }

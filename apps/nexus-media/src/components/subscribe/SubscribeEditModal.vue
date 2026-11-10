@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -24,6 +24,7 @@ import {
 import { getFilterRulesApi } from '#/api/modules/filter';
 import { getMediaDetailByRefApi } from '#/api/modules/media';
 import { getVisibleSitesApi } from '#/api/modules/site';
+import { sitesPayload } from '#/components/subscribe/siteSelection';
 import { getContentProfileLabel } from '#/plugin-framework/loader';
 import {
   joinMultiSelect,
@@ -62,8 +63,9 @@ export interface SubscribeEditItem {
   save_path?: string;
   total_ep?: number | string;
   current_ep?: number | string;
-  rss_sites?: string[];
-  search_sites?: string[];
+  // null = 未设置（沿用默认设置/全部站点）；[] = 明确一个都不选
+  rss_sites?: null | string[];
+  search_sites?: null | string[];
   default_rss_sites?: string[];
   default_search_sites?: string[];
 }
@@ -124,6 +126,10 @@ const form = ref({
   rss_sites: [] as string[],
   search_sites: [] as string[],
 });
+
+// 站点是否被本弹窗改动过：没动过就原样保留（新增→沿用默认设置，编辑→保持已存值），
+// 动过则如实提交，包括「一个都不选」——它必须落库为"零站点"，不能又被展开成全部。
+const sitesTouched = reactive({ rss: false, search: false });
 
 // 动漫与电视剧共用季/集相关表单项
 const isTv = computed(() => form.value.type !== 'movie');
@@ -229,6 +235,15 @@ function siteLabels(
 }
 
 const defaultRssHint = computed(() => {
+  if (sitesTouched.rss) {
+    return '已一个都不选：该订阅不轮询任何订阅站点';
+  }
+  if (
+    Array.isArray(props.item?.rss_sites) &&
+    props.item.rss_sites.length === 0
+  ) {
+    return '已存为「一个都不选」：该订阅不轮询任何订阅站点';
+  }
   const labels = siteLabels(props.item?.default_rss_sites, rssSites.value);
   return labels
     ? `当前使用默认订阅站点：${labels}`
@@ -236,6 +251,15 @@ const defaultRssHint = computed(() => {
 });
 
 const defaultSearchHint = computed(() => {
+  if (sitesTouched.search) {
+    return '已一个都不选：该订阅不会主动搜索站点（仍可按订阅站点/RSS 获取）';
+  }
+  if (
+    Array.isArray(props.item?.search_sites) &&
+    props.item.search_sites.length === 0
+  ) {
+    return '已存为「一个都不选」：该订阅不会主动搜索站点（仍可按订阅站点/RSS 获取）';
+  }
   const labels = siteLabels(
     props.item?.default_search_sites,
     searchSites.value,
@@ -292,6 +316,8 @@ watch([() => props.show, () => props.item], async ([visible, item]) => {
           )
         : [],
     };
+    sitesTouched.rss = false;
+    sitesTouched.search = false;
     tmdbInput.value = currentTmdbId();
     tmdbResolved.value = null;
     tmdbError.value = '';
@@ -370,8 +396,10 @@ function toggleAllSites(type: string, checked: boolean) {
       : searchSites.value.map((s) => s.value);
   if (type === 'rss') {
     form.value.rss_sites = checked ? [...all] : [];
+    sitesTouched.rss = true;
   } else {
     form.value.search_sites = checked ? [...all] : [];
+    sitesTouched.search = true;
   }
 }
 
@@ -381,6 +409,7 @@ function updateSite(type: 'rss' | 'search', value: string, checked: boolean) {
   if (checked) set.add(value);
   else set.delete(value);
   form.value[key] = [...set];
+  sitesTouched[type] = true;
 }
 
 function toggleSite(type: 'rss' | 'search', value: string) {
@@ -389,6 +418,7 @@ function toggleSite(type: 'rss' | 'search', value: string) {
   if (set.has(value)) set.delete(value);
   else set.add(value);
   form.value[key] = [...set];
+  sitesTouched[type] = true;
 }
 
 function handleConfirm() {
@@ -424,8 +454,14 @@ function handleConfirm() {
     filter_free: form.value.filter_free,
     download_setting: form.value.download_setting || undefined,
     save_path: form.value.save_path || undefined,
-    rss_sites: form.value.rss_sites,
-    search_sites: form.value.search_sites,
+    // 只有用户动过站点选择才提交：未动过交由后端沿用默认设置/已存值，
+    // 否则会把「没勾选」误存成「一个站点都不要」。
+    ...sitesPayload('rss_sites', sitesTouched.rss, form.value.rss_sites),
+    ...sitesPayload(
+      'search_sites',
+      sitesTouched.search,
+      form.value.search_sites,
+    ),
     in_form: 'manual',
   };
   if (isTv.value) {
