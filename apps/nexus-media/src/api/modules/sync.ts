@@ -122,6 +122,11 @@ export async function manualTransferUdfApi(data: {
   episode_part?: string;
   external_id?: string;
   inpath: string;
+  /**
+   * 批量转移：多选文件时一次提交多条，后端逐条执行并返回每个路径的结果。
+   * 省略时按单条处理（只认 inpath）。
+   */
+  inpaths?: string[];
   min_filesize?: number;
   outpath?: string;
   provider?: string;
@@ -131,7 +136,12 @@ export async function manualTransferUdfApi(data: {
   tmdb?: number;
   type?: string;
 }) {
-  return requestClient.post('/sync/rename/udf', data);
+  return requestClient.post<{
+    failed?: number;
+    results?: Array<{ message: string; path: string; success: boolean }>;
+    succeeded?: number;
+    total?: number;
+  }>('/sync/rename/udf', data);
 }
 
 /** 重命名文件 */

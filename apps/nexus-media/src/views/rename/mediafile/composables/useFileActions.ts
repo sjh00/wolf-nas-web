@@ -45,6 +45,15 @@ function saveBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+/** 取路径末段，用于在批量失败提示里点名具体文件 */
+function basenameOf(path: string): string {
+  const parts = String(path || '')
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter(Boolean);
+  return parts.at(-1) || String(path || '');
+}
+
 export function useFileActions(deps: ActionsDeps) {
   const notification = useAppNotification();
 
@@ -67,6 +76,8 @@ export function useFileActions(deps: ActionsDeps) {
   });
   const transferModalShow = ref(false);
   const transferPath = ref('');
+  // 多选转移的全部路径；单条时长度 1，与 transferPath 等价
+  const transferPaths = ref<string[]>([]);
   const transferLoading = ref(false);
   const hardlinkConfigShow = ref(false);
   const hardlinkConfigForm = ref({ path: '', dir: '' });
@@ -87,7 +98,17 @@ export function useFileActions(deps: ActionsDeps) {
     const single = items.length === 1 ? items[0]! : null;
     const allFiles = items.every((i) => !i.is_dir);
     const options: any[] = [
-      { label: '识别', key: 'identify', icon: menuIcon('lucide:scan-line') },
+      // 识别结果是单个文件的详细元数据，多选时无法在一个弹窗里并列展示。
+      // 只对单条开放：菜单里不出现，比「出现但只处理第一个」诚实得多。
+      ...(single
+        ? [
+            {
+              label: '识别',
+              key: 'identify',
+              icon: menuIcon('lucide:scan-line'),
+            },
+          ]
+        : []),
       { label: '刮削', key: 'scrap', icon: menuIcon('lucide:sparkles') },
       {
         label: '转移',
@@ -187,11 +208,10 @@ export function useFileActions(deps: ActionsDeps) {
         break;
       }
       case 'transfer': {
-        const item = items[0];
-        if (item) {
-          transferPath.value = item.path;
-          transferModalShow.value = true;
-        }
+        // 多选时必须把全部路径带进弹窗：早期只取 items[0]，选十个也只转第一个
+        if (items.length === 0) break;
+        transferPaths.value = items.map((item) => item.path);
+        transferModalShow.value = true;
         break;
       }
       case 'cleanup': {
@@ -224,13 +244,26 @@ export function useFileActions(deps: ActionsDeps) {
   }
 
   async function handleScrap(items: FileItem[]) {
-    try {
-      for (const item of items) {
+    // 逐个提交，单条失败不中断其余：早期 for + 单个 try 会让第一个失败
+    // 直接跳出循环，后面的文件一个都不处理，用户却只看到一句"刮削失败"
+    const failed: string[] = [];
+    let submitted = 0;
+    for (const item of items) {
+      try {
         await scrapMediaPathApi(item.path, deps.getBackendId());
+        submitted += 1;
+      } catch (error: any) {
+        failed.push(
+          `${basenameOf(item.path)}：${error?.message || '刮削失败'}`,
+        );
       }
-      notification.success('刮削任务已提交');
-    } catch (error: any) {
-      notification.error('刮削失败', { description: error?.message || '' });
+    }
+    if (failed.length > 0) {
+      notification.warning(`已提交 ${submitted} 个，${failed.length} 个失败`, {
+        description: failed.slice(0, 5).join('；'),
+      });
+    } else {
+      notification.success(`已提交 ${submitted} 个刮削任务`);
     }
   }
 
@@ -265,13 +298,25 @@ export function useFileActions(deps: ActionsDeps) {
   }
 
   async function handleSubtitle(items: FileItem[]) {
-    try {
-      for (const item of items) {
+    // 同 handleScrap：逐个提交，单条失败不影响其余
+    const failed: string[] = [];
+    let submitted = 0;
+    for (const item of items) {
+      try {
         await downloadSubtitleApi(item.path, item.name);
+        submitted += 1;
+      } catch (error: any) {
+        failed.push(
+          `${basenameOf(item.path)}：${error?.message || '字幕下载失败'}`,
+        );
       }
-      notification.success('字幕下载任务已提交');
-    } catch (error: any) {
-      notification.error('字幕下载失败', { description: error?.message || '' });
+    }
+    if (failed.length > 0) {
+      notification.warning(`已提交 ${submitted} 个，${failed.length} 个失败`, {
+        description: failed.slice(0, 5).join('；'),
+      });
+    } else {
+      notification.success(`已提交 ${submitted} 个字幕下载任务`);
     }
   }
 
@@ -291,8 +336,19 @@ export function useFileActions(deps: ActionsDeps) {
   async function submitTransfer(data: TransferFormData) {
     transferLoading.value = true;
     try {
-      await manualTransferUdfApi({
-        inpath: data.path,
+      // 弹窗带回的 paths 才是权威来源；缺失时退回单条路径
+      const paths = (data.paths?.length ? data.paths : [data.path])
+        .map((p) => String(p || '').trim())
+        .filter(Boolean);
+      const unique = [...new Set(paths)];
+      if (unique.length === 0) {
+        notification.warning('未选择要转移的文件');
+        return;
+      }
+      const res: any = await manualTransferUdfApi({
+        inpath: unique[0]!,
+        // 多于一条才发批量参数，单条保持旧请求体不变
+        ...(unique.length > 1 ? { inpaths: unique } : {}),
         outpath: data.outpath || undefined,
         syncmod: data.syncmod,
         type: data.type,
@@ -310,8 +366,40 @@ export function useFileActions(deps: ActionsDeps) {
         src_backend_id: data.src_backend_id || deps.getBackendId(),
         dst_backend_id: data.dst_backend_id || undefined,
       });
-      notification.success('转移任务已提交');
+
+      if (unique.length > 1) {
+        // 批量：按后端逐条结果如实汇报，失败项列出文件名
+        const payload = (res?.data ?? res) as {
+          failed?: number;
+          results?: Array<{ message: string; path: string; success: boolean }>;
+          succeeded?: number;
+        };
+        const results = payload?.results || [];
+        const failedItems = results.filter((item) => !item.success);
+        const succeeded =
+          payload?.succeeded ?? results.filter((item) => item.success).length;
+        if (failedItems.length > 0) {
+          const detail = failedItems
+            .slice(0, 5)
+            .map(
+              (item) =>
+                `${basenameOf(item.path)}：${item.message || '转移失败'}`,
+            )
+            .join('；');
+          const more =
+            failedItems.length > 5 ? ` 等 ${failedItems.length} 个` : '';
+          notification.warning(
+            `已提交 ${succeeded} 个，${failedItems.length} 个失败`,
+            { description: detail + more },
+          );
+        } else {
+          notification.success(`已提交 ${succeeded} 个转移任务`);
+        }
+      } else {
+        notification.success('转移任务已提交');
+      }
       transferModalShow.value = false;
+      deps.clearSelection?.();
     } catch (error: any) {
       notification.error('提交失败', { description: error?.message || '' });
     } finally {
@@ -487,6 +575,7 @@ export function useFileActions(deps: ActionsDeps) {
     transferLoading,
     transferModalShow,
     transferPath,
+    transferPaths,
     uploadFiles,
     uploading,
   };
