@@ -916,7 +916,8 @@ onMounted(() => {
     <!-- 转移 -->
     <TransferModal
       v-model:show="actions.transferModalShow.value"
-      :path="actions.transferPath.value"
+      :path="actions.transferPaths.value[0] || actions.transferPath.value"
+      :paths="actions.transferPaths.value"
       :src-backend-id="nav.currentBackendId.value"
       :loading="actions.transferLoading.value"
       @submit="actions.submitTransfer"

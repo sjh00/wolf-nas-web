@@ -34,6 +34,8 @@ import PathPickerModal from './PathPickerModal.vue';
 
 export interface TransferFormData {
   path: string;
+  /** 批量转移的多选路径；长度大于 1 时后端按批量处理 */
+  paths?: string[];
   outpath: string;
   syncmod: string;
   type: string;
@@ -59,6 +61,11 @@ const props = defineProps<{
   loading?: boolean;
   outpath?: string;
   path: string;
+  /**
+   * 多选文件时的全部路径。长度大于 1 时按批量转移处理，
+   * 「输入路径」改为只读展示数量，避免用户以为只转了一个。
+   */
+  paths?: string[];
   provider?: string;
   selectedLabel?: string;
   show: boolean;
@@ -71,6 +78,14 @@ const emit = defineEmits<{
   (e: 'update:show', value: boolean): void;
   (e: 'submit', data: TransferFormData): void;
 }>();
+/** 本次要转移的全部路径（去空去重）；单条模式退化为 [props.path] */
+const transferPaths = computed(() => {
+  const list = (props.paths?.length ? props.paths : [props.path])
+    .map((p) => String(p || '').trim())
+    .filter(Boolean);
+  return [...new Set(list)];
+});
+const isBatch = computed(() => transferPaths.value.length > 1);
 
 const form = ref<TransferFormData>({
   path: '',
@@ -95,6 +110,7 @@ watch(
     if (visible) {
       form.value = {
         path: props.path,
+        paths: [...transferPaths.value],
         outpath: props.outpath || '',
         syncmod: props.syncmod || 'copy',
         type: props.type || 'movie',
@@ -269,7 +285,8 @@ function handleClose() {
 }
 
 function handleSubmit() {
-  emit('submit', { ...form.value });
+  // 每次都按当前多选结果重建 paths，避免弹窗打开后选择变化未被带出
+  emit('submit', { ...form.value, paths: [...transferPaths.value] });
 }
 
 // 路径选择（复用 PathPickerModal）
@@ -391,14 +408,16 @@ function selectTmdbMedia(media: any) {
           </NFormItem>
         </div>
         <NFormItem label="输入路径">
+          <!-- 多选时明确显示数量与首个路径，避免误以为只转移了一个 -->
           <NInput
             v-model:value="form.path"
             readonly
             size="small"
-            :title="form.path"
+            :title="isBatch ? transferPaths.join('\n') : form.path"
           >
             <template #suffix>
               <NButton
+                v-if="!isBatch"
                 size="tiny"
                 text
                 @click="openPathPicker('src')"
@@ -410,6 +429,10 @@ function selectTmdbMedia(media: any) {
               </NButton>
             </template>
           </NInput>
+          <div v-if="isBatch" class="batch-hint">
+            已选择
+            {{ transferPaths.length }} 个文件，将逐个转移（单条失败不影响其余）
+          </div>
         </NFormItem>
         <NFormItem label="输出路径">
           <NInput
@@ -700,6 +723,13 @@ function selectTmdbMedia(media: any) {
 </template>
 
 <style scoped>
+.batch-hint {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground));
+}
+
 .tmdb-result-grid {
   display: flex;
   flex-direction: column;
