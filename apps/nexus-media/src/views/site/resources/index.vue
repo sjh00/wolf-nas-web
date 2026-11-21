@@ -21,6 +21,7 @@ import IdentifyResult from '#/components/media/IdentifyResult.vue';
 import { useDownloadEventStream } from '#/composables/useDownloadEventStream';
 import { useMultiVersionDownload } from '#/composables/useMultiVersionDownload';
 import { useAppNotification } from '#/utils/notify';
+import { isTimeoutError } from '#/utils/request-error';
 
 import DownloadModal from './components/DownloadModal.vue';
 import ResourceCard from './components/ResourceCard.vue';
@@ -308,8 +309,17 @@ async function confirmDownload() {
       downloadModalVisible.value = true;
       return;
     }
-  } catch {
-    // 全局请求拦截器已展示错误提示
+  } catch (error: any) {
+    // 超时通常意味着后端仍在识别/排队；全局拦截器会把它显示成失败，
+    // 这里补一句解释，避免误以为没提交而重复添加。
+    if (isTimeoutError(error)) {
+      notification.warning(
+        '请求超时，任务可能仍在排队处理，请稍后到「正在下载」确认；不要重复添加',
+      );
+      downloadModalVisible.value = false;
+      return;
+    }
+    // 其它错误已由全局请求拦截器展示
   } finally {
     downloadModalLoading.value = false;
   }

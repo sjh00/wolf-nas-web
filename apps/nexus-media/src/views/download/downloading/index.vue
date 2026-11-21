@@ -40,6 +40,7 @@ import MediaPoster from '#/components/media/MediaPoster.vue';
 import { useDownloadEventStream } from '#/composables/useDownloadEventStream';
 import { useMultiVersionDownload } from '#/composables/useMultiVersionDownload';
 import { useDownloadStore } from '#/store';
+import { isTimeoutError } from '#/utils/request-error';
 
 const downloadStore = useDownloadStore();
 const message = useMessage();
@@ -496,6 +497,17 @@ async function handleAddDownload() {
       return;
     }
   } catch (error: any) {
+    // 超时 ≠ 失败：后端可能仍在识别/排队，任务稍后才会出现在列表里。
+    // 这里明确提示「已提交、正在排队」，避免误判失败后重复添加。
+    if (isTimeoutError(error)) {
+      message.warning(
+        '请求超时，任务可能仍在排队处理，请稍后刷新列表确认；不要重复添加',
+      );
+      void fetchTasks(1);
+      scheduleQuickRefresh();
+      addModalShow.value = false;
+      return;
+    }
     message.error(error?.message || '添加下载失败');
   } finally {
     addLoading.value = false;

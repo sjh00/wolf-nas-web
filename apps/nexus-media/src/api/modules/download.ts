@@ -413,11 +413,13 @@ export async function addTorrentApi(params: {
   upload_volume_factor?: number;
   urls?: string[];
 }) {
+  // 后端提交后立刻返回；这里的超时只兜住「预检 + 排队」的极端情况。
+  // 放宽到 120s，避免队列稍慢就报超时、让人误以为添加失败而重复提交。
   return requestClient.post<DownloadApi.MultiVersionConfirm>(
     '/download/tasks/add_torrent',
     params,
     {
-      timeout: 60_000,
+      timeout: 120_000,
     },
   );
 }
