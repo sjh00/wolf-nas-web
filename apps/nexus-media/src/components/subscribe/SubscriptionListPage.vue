@@ -33,6 +33,7 @@ import {
   getMovieSubscriptionApi,
   getSubscriptionDetailApi,
   getTvSubscriptionApi,
+  invalidateDefaultSubscriptionSettingCache,
   refreshSubscriptionApi,
   removeSubscriptionApi,
   saveDefaultSubscriptionSettingApi,
@@ -915,6 +916,8 @@ async function handleSaveSetting(data: Record<string, any>) {
       data,
       effectiveProfile.value,
     );
+    // 默认设置变了：清掉共享缓存，各卡片下次打开时取新规则
+    invalidateDefaultSubscriptionSettingCache();
     notification.success('默认设置已保存');
   } catch (error: any) {
     notification.error('保存失败', { description: error?.message || '' });

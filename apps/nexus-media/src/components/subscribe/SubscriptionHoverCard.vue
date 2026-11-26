@@ -25,7 +25,7 @@ import { IconifyIcon } from '@vben/icons';
 
 import { NTag } from 'naive-ui';
 
-import { getDefaultSubscriptionSettingApi } from '#/api/modules/subscription';
+import { getDefaultSubscriptionSettingCached } from '#/api/modules/subscription';
 import MediaPoster from '#/components/media/MediaPoster.vue';
 import { formatPix, formatRestype } from '#/utils/subscribe';
 
@@ -277,15 +277,22 @@ const searchSites = computed<string[]>(() => {
 });
 
 async function loadDefaultSites() {
-  if (rssSites.value.length > 0 || searchSites.value.length > 0) return;
+  // 两组站点都自带值时用不到默认值，不必请求；只差一组时仍要取默认值，
+  // 否则那组会显示为空，与运行时实际使用的默认站点对不上。
+  const hasOwnRss =
+    Array.isArray(props.item.rss_sites) && props.item.rss_sites.length > 0;
+  const hasOwnSearch =
+    Array.isArray(props.item.search_sites) &&
+    props.item.search_sites.length > 0;
+  if (hasOwnRss && hasOwnSearch) return;
   try {
     const mtype = props.type === 'movie' ? 'movie' : 'tv';
     const profile = String(props.item.content_profile || '').trim();
-    const res: any = await getDefaultSubscriptionSettingApi(
+    // 走共享缓存：列表里每行都有这张悬浮卡，逐卡请求会直接打爆接口限流
+    const setting = await getDefaultSubscriptionSettingCached(
       mtype,
       profile && profile !== 'default' ? profile : undefined,
     );
-    const setting = res?.data || res || {};
     defaultRssSites.value = Array.isArray(setting.rss_sites)
       ? setting.rss_sites.filter(Boolean).map(String)
       : [];

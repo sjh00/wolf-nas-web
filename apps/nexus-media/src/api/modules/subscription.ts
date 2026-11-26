@@ -2,6 +2,8 @@
  * 媒体订阅 API
  * 对应后端: /api/subscription/*, /api/rss-automation/*
  */
+import { useUserStore } from '@vben/stores';
+
 import { requestClient } from '#/api/request';
 
 function toRssId(
@@ -169,6 +171,50 @@ export async function getDefaultSubscriptionSettingApi(
     mtype,
     ...(contentProfile ? { content_profile: contentProfile } : {}),
   });
+}
+
+/**
+ * 默认订阅设置的共享缓存（同一 mtype + 画像只请求一次，并发自动去重）。
+ *
+ * 订阅列表里每一行都挂着悬浮卡，每张卡都要「缺站点时显示默认站点」。如果每张
+ * 卡各发一次请求，一百多行订阅打开一次就是一二百次调用，直接撞上后端按
+ * 「IP + 路径」的每分钟 60 次限流，页面会刷出一片「请求过于频繁」。
+ */
+const defaultSettingCache = new Map<string, Promise<Record<string, any>>>();
+
+/** 缓存键带用户：同一浏览器切换账号时不会串用上一个账号的默认设置 */
+function currentUserCacheKey(): string {
+  try {
+    const info: any = useUserStore().userInfo || {};
+    return String(info.user_id ?? info.id ?? info.username ?? 'anon');
+  } catch {
+    // pinia 尚未就绪（极少见）：退化为不区分用户，不影响本次请求
+    return 'anon';
+  }
+}
+
+/** 取默认订阅设置（带缓存，返回 setting 本体而不是 axios 响应） */
+export function getDefaultSubscriptionSettingCached(
+  mtype: string,
+  contentProfile?: string,
+): Promise<Record<string, any>> {
+  const key = `${currentUserCacheKey()}::${mtype}::${contentProfile || ''}`;
+  const cached = defaultSettingCache.get(key);
+  if (cached) return cached;
+  const pending = getDefaultSubscriptionSettingApi(mtype, contentProfile)
+    .then((res: any) => res?.data || res || {})
+    .catch((error) => {
+      // 失败不缓存，下次进入还能重试
+      defaultSettingCache.delete(key);
+      throw error;
+    });
+  defaultSettingCache.set(key, pending);
+  return pending;
+}
+
+/** 保存默认订阅设置后清缓存，避免各页面继续展示旧规则 */
+export function invalidateDefaultSubscriptionSettingCache() {
+  defaultSettingCache.clear();
 }
 
 /** 保存默认订阅设置 */
