@@ -266,7 +266,7 @@ const defaultSearchHint = computed(() => {
   );
   return labels
     ? `当前使用默认搜索站点：${labels}`
-    : '未选择时默认使用全部已授权搜索站点';
+    : '未勾选时按「默认订阅设置」执行';
 });
 
 watch([() => props.show, () => props.item], async ([visible, item]) => {
